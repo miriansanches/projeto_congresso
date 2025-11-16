@@ -386,7 +386,7 @@ if pagina == "🏠 Menu Inicial":
     """, unsafe_allow_html=True)
     
     # Principais Fenômenos
-    st.markdown("## 🔍 Principais Fenômenos Investigados 🔍")
+    st.markdown("## Principais Fenômenos Investigados 🔍")
     
     st.markdown("### 🧠 1. Cognitive Offloading")
     st.markdown("""
@@ -416,7 +416,7 @@ if pagina == "🏠 Menu Inicial":
     """)
     
     # Estatísticas e Dados
-    st.markdown("## 📊 Dados Importantes 📊")
+    st.markdown("##  Dados Importantes ")
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -455,7 +455,7 @@ if pagina == "🏠 Menu Inicial":
     # Objetivos da Pesquisa
     st.markdown("""
     <div class="content-box">
-        <h2>🎯 Objetivos da Pesquisa 🎯</h2>
+        <h2>Objetivos da Pesquisa </h2>
         <p>
             ✅ Analisar impactos da IA sobre criatividade, pensamento crítico e autonomia<br>
             ✅ Investigar padrões de consumo digital e suas relações com vício, dopamina e estagnação mental<br>
@@ -468,7 +468,7 @@ if pagina == "🏠 Menu Inicial":
 
 # ==================== PÁGINA: GRÁFICOS ====================
 elif pagina == "📊 Gráficos":
-    st.markdown("# 📊 Análise de Dados Interativa 📊")
+    st.markdown("#  Análise de Dados Interativa ")
     
     st.markdown("""
     <div class="content-box">
@@ -667,7 +667,7 @@ elif pagina == "ℹ️ Sobre":
         st.markdown("""
         <div class="author-card">
             <img src="nicoli_felipe.jpg" class="profile-img"> <!-- Imagem da Autora -->
-            <h3>👩 Nicoli Felipe</h3>
+            <h3> Nicoli Felipe</h3>
             <p>
                 <strong>Formação:</strong><br>
                 🎓 Graduanda em Ciência de Dados pela Faculdade SENAI de Informática (2025-2026)<br>
@@ -743,23 +743,14 @@ elif pagina == "ℹ️ Sobre":
     </div>
     """, unsafe_allow_html=True)
     
-    # Agradecimentos
-    st.markdown("""
-    <div class="content-box">
-        <h2>🙏 Agradecimentos 🙏</h2>
-        <p>
-            Agradecemos à Professora Jéssica Franzon Cruz pela orientação e apoio durante todo o desenvolvimento deste trabalho. 
-            Também agradecemos à Faculdade SENAI de Informática e à comunidade acadêmica por todo o suporte. 💪✨
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
 
 # ==================== RODAPÉ ====================
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #0099ff; padding: 2rem; font-size: 0.9rem;">
-    <p>🧠⚡ <strong>Relação de Crescimento Inversamente Proporcional Entre a Inteligência Artificial e a Inteligência Humana</strong> ⚡🧠</p>
-    <p>Faculdade SENAI Paulo Antônio Skaf - Ciência de Dados 📊</p>
+    <p><strong>Relação de Crescimento Inversamente Proporcional Entre a Inteligência Artificial e a Inteligência Humana</strong> </p>
+    <p>Faculdade SENAI Paulo Antônio Skaf - Ciência de Dados </p>
     <p>© 2025 - Todos os direitos reservados ©</p>
 </div>
 """, unsafe_allow_html=True)
+
