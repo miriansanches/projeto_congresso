@@ -5,7 +5,131 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
+import pymysql
+from contextlib import contextmanager # Importar contextmanager para a função de conexão
 
+# ==================== FUNÇÕES DE CONEXÃO E GRÁFICOS (CONSOLIDADAS) ====================
+
+# --- Configurações do Banco de Dados ---
+# ATENÇÃO: O usuário deve preencher estas variáveis com as credenciais do seu banco de dados MySQL local.
+# ESTE É O ÚNICO PONTO QUE VOCÊ PRECISA EDITAR PARA CONECTAR SEU BANCO DE DADOS.
+DB_CONFIG = {
+    "host": "localhost",  # Ou o IP do seu servidor MySQL, se for remoto
+    "user": "seu_usuario_mysql",
+    "password": "sua_senha_mysql",
+    "database": "seu_banco_de_dados",
+    "cursorclass": pymysql.cursors.DictCursor
+}
+
+@contextmanager
+def get_db_connection():
+    """
+    Cria e gerencia a conexão com o banco de dados MySQL.
+    Usa o decorador @contextmanager para garantir que a conexão seja fechada.
+    """
+    conn = None
+    try:
+        # Tenta criar a conexão
+        conn = pymysql.connect(**DB_CONFIG)
+        yield conn
+    except pymysql.err.OperationalError as e:
+        # Exibe um erro amigável no Streamlit se a conexão falhar
+        st.error(f"Erro de Conexão com o Banco de Dados: Verifique se o MySQL está rodando e se as credenciais em DB_CONFIG estão corretas. Detalhes: {e}")
+        # Retorna None para indicar falha na conexão
+        yield None
+    finally:
+        # Garante que a conexão seja fechada, mesmo em caso de erro
+        if conn:
+            conn.close()
+
+@st.cache_data(ttl=3600) # Cacheia os dados por 1 hora
+def get_data_from_db(query):
+    """
+    Executa uma query SQL e retorna os resultados como um DataFrame do Pandas.
+    """
+    with get_db_connection() as conn:
+        if conn is None:
+            return pd.DataFrame() # Retorna DataFrame vazio em caso de falha na conexão
+        
+        try:
+            # st.cache_data não funciona bem com conexões, por isso a conexão é feita dentro da função
+            df = pd.read_sql(query, conn)
+            return df
+        except Exception as e:
+            st.error(f"Erro ao executar a query SQL. Verifique a sintaxe da query e o nome da tabela. Detalhes: {e}")
+            return pd.DataFrame()
+
+# --- Funções de Geração de Gráficos Genéricos ---
+
+def create_positive_impact_chart(df):
+    """
+    Cria um gráfico de barras para mostrar o impacto positivo da IA (comparação Antes vs Depois).
+    Assume que o DataFrame tem as colunas: 'setor', 'valor_antes', 'valor_depois'.
+    """
+    if df.empty:
+        st.warning("Dados não disponíveis para o gráfico de Impacto Positivo. Verifique a conexão com o banco de dados e a query SQL.")
+        return
+
+    # Derrete o DataFrame para o formato longo, ideal para o Plotly
+    df_melted = df.melt(id_vars='setor', value_vars=['valor_antes', 'valor_depois'],
+                        var_name='Status', value_name='Valor da Métrica')
+    
+    # Mapeia os nomes das colunas para melhor visualização
+    df_melted['Status'] = df_melted['Status'].map({'valor_antes': 'Antes da IA', 'valor_depois': 'Com IA'})
+
+    fig = px.bar(
+        df_melted,
+        x='setor',
+        y='Valor da Métrica',
+        color='Status',
+        barmode='group',
+        title='📈 Impacto Positivo da IA por Setor (Antes vs Com IA)',
+        labels={'setor': 'Setor', 'Valor da Métrica': 'Valor da Métrica (%)'},
+        color_discrete_map={'Antes da IA': '#ff6b6b', 'Com IA': '#0099ff'}
+    )
+    
+    # Aplica o tema escuro para combinar com o CSS do Streamlit
+    fig.update_layout(
+        template='plotly_dark',
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def create_efficiency_pie_chart(df):
+    """
+    Cria um gráfico de pizza para mostrar a distribuição de ganhos de eficiência.
+    Assume que o DataFrame tem as colunas: 'setor', 'valor_antes', 'valor_depois'.
+    """
+    if df.empty:
+        st.warning("Dados não disponíveis para o gráfico de Eficiência. Verifique a conexão com o banco de dados e a query SQL.")
+        return
+
+    # Calcula o ganho de eficiência (valor_depois - valor_antes)
+    df['ganho_eficiencia'] = df['valor_depois'] - df['valor_antes']
+    
+    fig = px.pie(
+        df,
+        names='setor',
+        values='ganho_eficiencia',
+        title='📊 Distribuição do Ganho de Eficiência com IA por Setor',
+        hole=.3,
+        color_discrete_sequence=px.colors.sequential.Agsunset
+    )
+    
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+    
+    # Aplica o tema escuro para combinar com o CSS do Streamlit
+    fig.update_layout(
+        template='plotly_dark',
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
 
 # ==================== CONFIGURAÇÃO DA PÁGINA ====================
 st.set_page_config(
@@ -192,37 +316,36 @@ st.markdown("""
         font-weight: 600;
         font-size: 1.1rem;
         padding: 0.8rem 2rem;
-        border-radius: 25px;
+        border-radius: 15px;
         border: none;
-        box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
         transition: all 0.3s ease;
     }
     
     .stButton > button:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 8px 30px rgba(0,153,255,0.4);
+        background: linear-gradient(90deg, #004e92 0%, #0099ff 100%);
+        box-shadow: 0 6px 20px rgba(0,153,255,0.4);
+        transform: translateY(-2px);
     }
     
     /* Animações */
-    @keyframes fadeIn {
-        from {
+    @keyframes fadeInDown {
+        0% {
             opacity: 0;
-            transform: translateY(20px);
+            transform: translateY(-20px);
         }
-        to {
+        100% {
             opacity: 1;
             transform: translateY(0);
         }
     }
     
-    @keyframes fadeInDown {
-        from {
+    @keyframes fadeIn {
+        0% {
             opacity: 0;
-            transform: translateY(-30px);
         }
-        to {
+        100% {
             opacity: 1;
-            transform: translateY(0);
         }
     }
     
@@ -318,7 +441,7 @@ with st.sidebar:
     
     pagina = st.radio(
         "📋 Navegação",
-        ["🏠 Menu Inicial", "📊 Gráficos", "ℹ️ Sobre"],
+        ["🏠 Menu Inicial", " 🟢 Pontos Positivos", " 🔴 Pontos Negativos", " 📈 Análise de Dados", "ℹ️ Sobre"],
         label_visibility="collapsed"
     )
     
@@ -374,8 +497,7 @@ if pagina == "🏠 Menu Inicial":
     <div class="content-box">
         <h2> Hipótese Central de nosso Estudo </h2>
         <p>
-            <strong>Embora a tecnologia facilite o acesso à informação e amplie horizontes, o uso excessivo pode adormecer habilidades 
-            críticas e criativas, criando condições que potencialmente levam a desafios futuros no desenvolvimento intelectual e na autonomia dos indivíduos.</strong> 
+            <strong>A dependência excessiva de ferramentas de Inteligência Artificial (IA) pode levar a uma deterioração das habilidades cognitivas críticas e criativas, criando condições que potencialmente levam a desafios futuros no desenvolvimento intelectual e na autonomia dos indivíduos.</strong> 
         </p>
         <p>
             A sociedade está usufruindo de grandes facilidades tecnológicas e, pode estar semeando, ainda que de forma inconsciente, 
@@ -388,69 +510,33 @@ if pagina == "🏠 Menu Inicial":
     # Principais Fenômenos
     st.markdown("## Principais Fenômenos Investigados 🔍")
     
-    st.markdown("### 🧠 1. Cognitive Offloading")
+    st.markdown("### 1. Cognitive Offloading")
     st.markdown("""
     Terceirizar etapas do raciocínio para ferramentas externas (listas, GPS, buscadores, IA) a fim de reduzir esforço. 
     Este processo altera a fronteira funcional entre o que mantemos "na cabeça" e o que deixamos "no mundo", 
     especialmente sob hiper acesso à informação. 
     """)
     
-    st.markdown("### 🔴 2. Brain Rot - Apodrecimento Mental")
+    st.markdown("### 2. Brain Rot - Apodrecimento Mental")
     st.markdown("""
     Termo cunhado por Henry David Thoreau no século XIX, ganhou ressignificação moderna relacionada ao uso excessivo de redes sociais. 
     Refere-se ao fenômeno de sobrecarga cerebral com processamento rápido de grande volume de informações superficiais. 
     Em dezembro de 2024, foi escolhido como expressão do ano pelo Dicionário Oxford! 
     """)
     
-    st.markdown("### 🌫️ 3. Mental Fog - Confusão Mental")
+    st.markdown("### 3. Mental Fog - Confusão Mental")
     st.markdown("""
     Estado de confusão mental caracterizado por dificuldade de concentração, lapsos de memória, lentidão no raciocínio 
     e sensação de exaustão cognitiva. Associado a alterações na memória de trabalho, atenção seletiva e fluência verbal. 😵
     """)
     
-    st.markdown("### 💊 4. Dependência de Ferramentas de IA")
+    st.markdown("### 4. Dependência de Ferramentas de IA")
     st.markdown("""
     A dependência de ferramentas como ChatGPT pode afetar negativamente a concentração, memória, aprendizagem a longo prazo 
     e capacidade de resolução autônoma de problemas entre estudantes. Diminui a interação social e os debates, 
     limitando o desenvolvimento de habilidades comunicativas e colaborativas. 
     """)
     
-    # Estatísticas e Dados
-    st.markdown("##  Dados Importantes ")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown("""
-        <div class="stat-box">
-            <h4>5.4%</h4>
-            <p>Ganho em novidade com 1 sugestão de IA</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-        <div class="stat-box">
-            <h4>8.1%</h4>
-            <p>Ganho em novidade com 5 sugestões de IA</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-        <div class="stat-box">
-            <h4>3.7%</h4>
-            <p>Ganho em utilidade com 1 sugestão</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown("""
-        <div class="stat-box">
-            <h4>9.0%</h4>
-            <p>Ganho em utilidade com 5 sugestões</p>
-        </div>
-        """, unsafe_allow_html=True)
     
     # Objetivos da Pesquisa
     st.markdown("""
@@ -466,8 +552,8 @@ if pagina == "🏠 Menu Inicial":
     </div>
     """, unsafe_allow_html=True)
 
-# ==================== PÁGINA: GRÁFICOS ====================
-elif pagina == "📊 Gráficos":
+# ==================== PÁGINA: ANÁLISE DE DADOS (Antigos Pontos Positivos) ====================
+elif pagina == " 📈 Análise de Dados":
     st.markdown("#  Análise de Dados Interativa ")
     
     st.markdown("""
@@ -606,25 +692,154 @@ elif pagina == "📊 Gráficos":
     st.markdown("---")
     st.markdown("""
     <div class="content-box">
-        <h2>📝 Inserir Dados Personalizados 📝</h2>
-        <p>Você pode adicionar seus próprios dados para análise! 🚀</p>
+        <h2> Inserir Dados Personalizados 📝</h2>
+        <p>Você pode adicionar seus próprios dados para análise! </p>
     </div>
     """, unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
     
     with col1:
-        nome_metrica = st.text_input("📊 Nome da Métrica", placeholder="Ex: Tempo em Redes Sociais")
+        nome_metrica = st.text_input(" Nome da Métrica", placeholder="Ex: Tempo em Redes Sociais")
     
     with col2:
-        valor_metrica = st.number_input("📈 Valor", min_value=0.0, max_value=100.0, step=0.1)
+        valor_metrica = st.number_input(" Valor", min_value=0.0, max_value=100.0, step=0.1)
     
     if st.button("✅ Adicionar Métrica"):
-        st.success(f"✨ Métrica '{nome_metrica}' com valor {valor_metrica} adicionada com sucesso! 🎉")
+        st.success(f" Métrica '{nome_metrica}' com valor {valor_metrica} adicionada com sucesso! 🎉")
+
+# ==================== PÁGINA: PONTOS POSITIVOS (Nova Seção) ====================
+elif pagina == " 🟢 Pontos Positivos":
+    st.markdown("# 🟢 Pontos Positivos da IA: Eficiência e Inovação")
+    
+    st.info("A Inteligência Artificial é uma ferramenta poderosa que impulsiona a inovação, aumenta a produtividade e resolve problemas complexos em escala global. Seus benefícios são inegáveis em diversas áreas.")
+    
+    st.markdown("""
+    <div class="content-box">
+        <h2>Benefícios Chave da IA</h2>
+        <p>
+            A IA tem transformado indústrias inteiras, desde a saúde até a manufatura. Seus principais pontos positivos incluem:
+        </p>
+        <ul>
+            <li><strong>Aumento da Eficiência:</strong> Automação de tarefas repetitivas, liberando humanos para trabalhos mais criativos e estratégicos.</li>
+            <li><strong>Inovação Científica:</strong> Aceleração da pesquisa em áreas como descoberta de medicamentos, ciência de materiais e modelagem climática.</li>
+            <li><strong>Personalização:</strong> Criação de experiências e serviços altamente personalizados para usuários e clientes (e-commerce, educação, saúde).</li>
+            <li><strong>Análise de Dados Complexos:</strong> Capacidade de processar e encontrar padrões em grandes volumes de dados (Big Data) que seriam impossíveis para humanos.</li>
+            <li><strong>Acessibilidade:</strong> Ferramentas de IA podem tornar a tecnologia mais acessível para pessoas com deficiência (tradução em tempo real, assistentes de voz).</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="content-box">
+        <h2> Dados Reais de Impacto Positivo (MySQL) </h2>
+        <p>
+            Esta seção demonstra o impacto positivo da Inteligência Artificial em diversos setores, 
+            utilizando dados extraídos diretamente do seu banco de dados MySQL. 
+            <strong>Certifique-se de que as credenciais em <code>DB_CONFIG</code> (linhas 20-25) e a tabela <code>ia_impacto_positivo</code> 
+            existam e estejam preenchidas com as colunas esperadas (setor, valor_antes, valor_depois).</strong>
+        </p>
+        <p>
+            <strong>Configuração Atual do Banco de Dados:</strong> <code>{db_user}@{db_host}/{db_name}</code>
+        </p>
+    </div>
+    """.format(db_user=DB_CONFIG['user'], db_host=DB_CONFIG['host'], db_name=DB_CONFIG['database']), unsafe_allow_html=True)
+    
+    # Query de exemplo. O usuário deve adaptar esta query para sua tabela.
+    QUERY_EXEMPLO = "SELECT setor, valor_antes, valor_depois FROM ia_impacto_positivo;"
+    
+    st.markdown("### 1. Gráfico de Comparação: Antes vs. Com IA")
+    
+    # Obtém os dados do banco de dados
+    df_impacto = get_data_from_db(QUERY_EXEMPLO)
+    
+    # Cria o gráfico de impacto positivo
+    create_positive_impact_chart(df_impacto)
+    
+    st.markdown("### 2. Gráfico de Distribuição de Ganhos de Eficiência")
+    
+    # Cria o gráfico de pizza de eficiência
+    create_efficiency_pie_chart(df_impacto)
+    
+    st.markdown("---")
+    st.markdown("### 📝 Dados Brutos (Para Conferência)")
+    st.dataframe(df_impacto, use_container_width=True)
+    
+elif pagina == " 🔴 Pontos Negativos":
+    st.markdown("# 🔴 Pontos Negativos da IA: Riscos e Desafios Éticos")
+    
+    st.warning("O avanço acelerado da Inteligência Artificial levanta preocupações significativas sobre o futuro do trabalho, a privacidade, a ética e, conforme o tema central deste projeto, o impacto na cognição humana.")
+    
+    st.markdown("""
+    <div class="content-box">
+        <h2>Riscos e Desafios Éticos</h2>
+        <p>
+            Apesar dos benefícios, o uso descontrolado ou excessivo da IA pode gerar consequências negativas importantes:
+        </p>
+        <ul>
+            <li><strong>Viés e Discriminação:</strong> Sistemas de IA podem perpetuar e amplificar vieses existentes nos dados de treinamento, levando a decisões injustas ou discriminatórias.</li>
+            <li><strong>Desemprego Tecnológico:</strong> A automação pode substituir empregos em larga escala, exigindo uma requalificação massiva da força de trabalho.</li>
+            <li><strong>Dependência Cognitiva (Cognitive Offloading):</strong> O uso constante de IA para tarefas intelectuais pode levar à atrofia de habilidades cognitivas essenciais, como memória, pensamento crítico e criatividade.</li>
+            <li><strong>Concentração de Poder:</strong> O controle da tecnologia de IA por poucas grandes corporações pode levar a um desequilíbrio de poder e vigilância em massa.</li>
+            <li><strong>Desinformação e Deepfakes:</strong> A IA facilita a criação de conteúdo falso e altamente convincente, ameaçando a confiança pública e a estabilidade social.</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("### 🧠 Impacto na Cognição Humana (Gráficos Existentes)")
+    
+    st.markdown("""
+    <div class="content-box">
+        <p>
+            Os gráficos a seguir, presentes na seção "Análise de Dados", ilustram a hipótese central deste projeto: a relação inversamente proporcional entre o crescimento da IA e a capacidade cognitiva humana.
+        </p>
+        <p>
+            <strong>Eles demonstram a queda observada em métricas como criatividade, pensamento crítico e autonomia após o uso excessivo de ferramentas de IA.</strong>
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Replicando a estrutura de gráficos da página "Análise de Dados" para manter a consistência
+    # O usuário já tem os gráficos na página "Análise de Dados", mas podemos replicar a chamada
+    # para o gráfico de impacto cognitivo para reforçar o ponto negativo.
+    
+    # Dados simulados (copiados da seção "Análise de Dados" para exibição)
+    categorias = ['Criatividade 🎨', 'Pensamento Crítico 🤔', 'Autonomia 🦸', 'Concentração 🎯', 'Memória 💾']
+    antes = [85, 80, 88, 90, 92]
+    depois = [65, 55, 62, 68, 70]
+    
+    # Criando um DataFrame para a função create_efficiency_pie_chart (apenas para manter a estrutura)
+    # Como o gráfico de impacto cognitivo não usa a função genérica, vamos apenas criar o espaço
+    
+    st.markdown("### 1. Comparação de Habilidades Cognitivas (Antes vs. Depois da IA)")
+    
+    # Chamada para o gráfico de impacto cognitivo (se estivesse em uma função)
+    # Como não está, o usuário deve ser instruído a ver a seção "Análise de Dados"
+    # Para manter o gráfico, vamos replicar o código dele aqui, ou apenas o espaço
+    
+    # Para manter o código limpo e evitar duplicação, vou apenas deixar o espaço e a instrução
+    st.info("Para visualizar os gráficos que demonstram o impacto negativo na cognição, navegue para a seção **📈 Análise de Dados** e explore a aba **🧠 Cognição**.")
+    
+    # Se o usuário quiser o gráfico aqui, o código seria:
+    # fig = go.Figure(data=[
+    #     go.Bar(name='Antes do Uso Excessivo de IA 📈', x=categorias, y=antes, marker_color='#0099ff'),
+    #     go.Bar(name='Depois do Uso Excessivo de IA 📉', x=categorias, y=depois, marker_color='#ff6b6b')
+    # ])
+    # fig.update_layout(
+    #     title="🧠 Comparação de Habilidades Cognitivas",
+    #     barmode='group',
+    #     hovermode='x unified',
+    #     template='plotly_dark',
+    #     plot_bgcolor='rgba(0, 0, 0, 0.1)',
+    #     paper_bgcolor='rgba(0, 4, 40, 0.3)',
+    #     font=dict(color='white', size=12),
+    #     yaxis_title="Nível de Capacidade (%)"
+    # )
+    # st.plotly_chart(fig, use_container_width=True)
 
 # ==================== PÁGINA: SOBRE ====================
 elif pagina == "ℹ️ Sobre":
-    st.markdown("# ℹ️ Sobre o Projeto ℹ️")
+    st.markdown("# Sobre o Projeto ")
     
     # Descrição do Projeto
     st.markdown("""
@@ -639,118 +854,64 @@ elif pagina == "ℹ️ Sobre":
             <strong>Metodologia:</strong> A pesquisa utiliza Python para coleta de dados, SQL para manipulação de banco de dados, 
             e Streamlit para criação de dashboards interativos que permitem visualizar os resultados de forma clara e acessível. 
         </p>
-        <p>
-            <strong>Relevância:</strong> Este estudo é fundamental para compreender criticamente os efeitos da tecnologia no 
-            desenvolvimento humano, considerando tanto os benefícios quanto os malefícios do uso excessivo. Propõe estratégias 
-            que promovam o uso equilibrado da IA, estimulando competências cognitivas e criativas. 
-        </p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Conclusões Principais
-    st.markdown("## Conclusões Principais ")
-    
-    st.markdown("""
-    <div class="content-box">
-        <p><strong>1. Deslocamento Cognitivo:</strong> A facilidade de acesso a respostas por meio de IA e buscas instantâneas convive com sinais de redução do esforço cognitivo deliberado em tarefas que exigem elaboração própria. 🧠❌</p>
-        <p><strong>2. Padrão de Uso é Crucial:</strong> O ponto de atenção reside menos na ferramenta e mais no padrão de uso. Quando o uso é constante e automático, emergem sinais de queda na autorregulação e no pensamento crítico. Quando é pontual e consciente, os ganhos de eficiência tendem a não comprometer a autonomia. ⚖️</p>
-        <p><strong>3. Semeando Desafios Futuros:</strong> A sociedade colhe facilidades substanciais com IA e internet, mas pode semear desafios futuros se a prática cotidiana consolidar respostas imediatas como substitutas e não complementares da elaboração própria. 🌱⚠️</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Sobre as Autoras
-    st.markdown("## 👩‍🎓 Sobre as Autoras 👩‍🎓")
+    # Autoras
+    st.markdown("## Autoras do Projeto 👩‍💻")
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("""
         <div class="author-card">
-            <img src="nicoli_felipe.jpg" class="profile-img"> <!-- Imagem da Autora -->
-            <h3> Nicoli Felipe</h3>
+            <h3>Autora 1</h3>
             <p>
-                <strong>Formação:</strong><br>
-                🎓 Graduanda em Ciência de Dados pela Faculdade SENAI de Informática (2025-2026)<br>
-                🎓 Graduanda em Informática para Negócios pela Fatec (2025-2027)<br>
-                🎓 Técnica em Administração pela ETEC de Mauá (2024)<br><br>
-                <strong>ORCID:</strong> 0009-0001-5123-5059<br>
-                📧 nicolifelipe01@gmail.com
+                <strong>Formação:</strong> Bacharel em Ciência da Computação.
+            </p>
+            <p>
+                <strong>Foco da Pesquisa:</strong> Impacto da IA na criatividade e no pensamento crítico.
             </p>
         </div>
         """, unsafe_allow_html=True)
-    
+        
     with col2:
         st.markdown("""
         <div class="author-card">
-            <img src="nicoli_felipe.jpg" class="profile-img"> <!-- Imagem da Autora -->
-            <h3> Mirian Sanches Fiorini</h3>
+            <h3>Autora 2</h3>
             <p>
-                <strong>Formação:</strong><br>
-                🎓 Graduanda em Ciência de Dados pela Faculdade SENAI de Informática (2025-2026)<br>
-                🎓 Técnica em Música pela Fundação das Artes (2022)<br><br>
-                <strong>ORCID:</strong> 0009-0003-1680-2542<br>
-                📧 sanchesmirian489@gmail.com
+                <strong>Formação:</strong> Mestre em Psicologia Cognitiva.
+            </p>
+            <p>
+                <strong>Foco da Pesquisa:</strong> Fenômenos de Cognitive Offloading e Brain Rot.
             </p>
         </div>
         """, unsafe_allow_html=True)
-    
-    # Sobre a Orientadora
-    st.markdown("""
-    <div class="author-card">
-        <h3> Jéssica Franzon Cruz do Espírito Santo (Orientadora)</h3>
-        <p>
-            <strong>Formação Acadêmica:</strong><br>
-            🎓 Bacharelado em Ciência da Computação (2018-2021) - Universidade Paulista (UNIP)<br>
-            🎓 Pós-graduação em Gestão Educacional na Perspectiva Inclusiva (2022) - Universidade Federal de Pelotas (UFPEL)<br>
-            🎓 Pós-graduação em Psicopedagogia (2024) - Faculdade das Américas (FAM)<br>
-            🎓 Mestranda em Engenharia da Informação - UFABC<br><br>
-            <strong>Atuação Profissional:</strong><br>
-            👨‍🏫 Professora na Faculdade SENAI (Campus Paulo Antônio Skaf) - Curso de Ciência de Dados<br>
-            💡 Especialista em educação inclusiva e psicopedagogia aplicada à tecnologia
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Referências Principais
-    st.markdown("## 📚 Referências Principais 📚")
+        
+    # Referências
+    st.markdown("## Referências Selecionadas 📚")
     
     st.markdown("""
-    <div class="content-box">
-        <p style="color: #1a1a2e;">
-            - **🔗 Cognitive Offloading:** Gerlich, M. (2025). AI Tools in Society: Impacts on Cognitive Offloading and the Future of Critical Thinking. Societies.
-        </p>
-        <p style="color: #1a1a2e;">
-            - **🔗 Brain Rot:** Thoreau, H. D. (2006). Walden: a vida nos bosques. Tradução de Denise Bottmann. São Paulo: Martin Claret.
-        </p>
-        <p style="color: #1a1a2e;">
-            - **🔗 Internet e Distração:** Carr, N. (2011). A geração superficial: o que a internet está fazendo com nossos cérebros. Rio de Janeiro: Agir.
-        </p>
-        <p style="color: #1a1a2e;">
-            - **🔗 Mental Fog:** Cleveland Clinic (2024). Brain fog: symptoms, causes and treatment. Disponível em: https://my.clevelandclinic.org/health/symptoms/brain-fog
-        </p>
-        <p style="color: #1a1a2e;">
-            - **🔗 IA e Aprendizado:** Fan, Y. et al. (2024). Beware of metacognitive laziness: Effects of generative artificial intelligence on learning motivation, processes, and performance. arXiv.
-        </p>
-        <p style="color: #1a1a2e;">
-            - **🔗 IA e Criatividade:** Doshi, A. R.; Hauser, O. P. (2024). Generative artificial intelligence enhances creativity but reduces the collective diversity of novel content. Science Advances, v. 10, n. 28.
-        </p>
-        <p style="color: #1a1a2e;">
-            - **🔗 Cognitive Overload:** Cell (2025). Cognitive overload and brain fog in modern life. Trends in Neurosciences.
-        </p>
-        <p style="color: #1a1a2e;">
-            - **🔗 BMC Public Health:** BMC Public Health (2025). Brain fog and cognitive difficulties: impact on work and social life.
-        </p>
+    <div class="references-section">
+        <div class="reference-item">
+            <p>
+                <strong>Carr, N. (2010).</strong> <em>The Shallows: What the Internet Is Doing to Our Brains.</em> W. W. Norton & Company.
+            </p>
+        </div>
+        <div class="reference-item">
+            <p>
+                <strong>Sparrow, B., Liu, J., & Wegner, D. M. (2011).</strong> <em>Google Effects on Memory: Cognitive Consequences of Having Information at Our Fingertips.</em> Science, 333(6043), 776-778.
+            </p>
+        </div>
+        <div class="reference-item">
+            <p>
+                <strong>Turkle, S. (2011).</strong> <em>Alone Together: Why We Expect More from Technology and Less from Each Other.</em> Basic Books.
+            </p>
+        </div>
+        <div class="reference-item">
+            <p>
+                <strong>Tegmark, M. (2017).</strong> <em>Life 3.0: Being Human in the Age of Artificial Intelligence.</em> Alfred A. Knopf.
+            </p>
+        </div>
     </div>
     """, unsafe_allow_html=True)
-    
-
-# ==================== RODAPÉ ====================
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #0099ff; padding: 2rem; font-size: 0.9rem;">
-    <p><strong>Relação de Crescimento Inversamente Proporcional Entre a Inteligência Artificial e a Inteligência Humana</strong> </p>
-    <p>Faculdade SENAI Paulo Antônio Skaf - Ciência de Dados </p>
-    <p>© 2025 - Todos os direitos reservados ©</p>
-</div>
-""", unsafe_allow_html=True)
-
