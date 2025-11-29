@@ -1694,7 +1694,7 @@ elif pagina == "ℹ️ Sobre":
     with col2:
         # Card Mirian Sanches Fiorini (imagem embutida em HTML para ficar dentro da caixa)
         try:
-            with open("/Users/miriansanchesfiorini/Desktop/Arquivo 2/imagens/mirian.sanches.jpg.jpeg", "rb") as f:
+            with open("mirian.sanches.jpg.jpeg", "rb") as f:
                 img_bytes = f.read()
             img_b64 = base64.b64encode(img_bytes).decode("utf-8")
 
