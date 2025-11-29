@@ -1669,7 +1669,7 @@ elif pagina == "ℹ️ Sobre":
     with col1:
         # Card Nicoli Felipe (imagem embutida em HTML para ficar dentro da caixa)
         try:
-            with open("/Users/miriansanchesfiorini/Desktop/Arquivo 2/imagens/nicoli.felipe.jpg.jpeg", "rb") as f:
+            with open("https://github.com/miriansanches/projeto_congresso/blob/main/nicoli.felipe.jpg.jpeg", "rb") as f:
                 img_bytes = f.read()
             img_b64 = base64.b64encode(img_bytes).decode("utf-8")
 
