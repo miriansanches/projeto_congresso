@@ -1719,7 +1719,7 @@ elif pagina == "ℹ️ Sobre":
     st.markdown("## Sobre a Orientadora")
     
     try:
-        with open("/Users/miriansanchesfiorini/Desktop/Arquivo 2/imagens/WhatsApp Image 2025-11-29 at 05.51.35.jpeg", "rb") as f:
+        with open("WhatsApp Image 2025-11-29 at 05.51.35.jpeg", "rb") as f:
             img_bytes = f.read()
         img_b64 = base64.b64encode(img_bytes).decode("utf-8")
 
