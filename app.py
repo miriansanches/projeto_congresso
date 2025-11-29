@@ -1,4 +1,6 @@
 import PIL
+from PIL import Image, UnidentifiedImageError
+import base64
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -7,21 +9,15 @@ from datetime import datetime
 import numpy as np
 import json
 from io import StringIO
-from pathlib import Path
-
 
 # Função para carregar e preparar os dados do Survey_AI.csv
 @st.cache_data
 def load_and_prepare_survey_data():
-    # O arquivo Survey_AI.csv não foi fornecido diretamente, mas o código do notebook
-    # sugere que ele está em 'upload/Survey_AI.csv'.
-    # O usuário deve colocar o arquivo 'Survey_AI.csv' na pasta 'upload'
-    
-    # Tentativa de carregar o arquivo real se ele existir
     try:
+        # Caminho relativo: espera o arquivo na mesma pasta do app.py
         df = pd.read_csv('Survey_AI.csv', encoding='utf-8')
     except FileNotFoundError:
-        st.error("Arquivo 'Survey_AI.csv' não encontrado. Por favor, certifique-se de que ele está na pasta 'upload'.")
+        st.error("Arquivo 'Survey_AI.csv' não encontrado. Coloque o arquivo na mesma pasta do app ou ajuste o caminho no código.")
         return None
     except Exception as e:
         st.warning(f"Erro ao carregar 'Survey_AI.csv' com utf-8: {e}. Tentando 'latin-1'.")
@@ -42,7 +38,9 @@ def load_and_prepare_survey_data():
         'Q5.Feelings': 'Sentimentos_IA',
         'Q12.Gender': 'Genero',
         'Q13.Year_of_study': 'Ano_Estudo',
-        'Q14.Major': 'Curso'
+        'Q14.Major': 'Curso',
+        'Q15.Passed_exams': 'Exames_Aprovados',
+        'Q16.GPA': 'GPA'
     }
     
     # Aplicar o mapeamento apenas se as colunas existirem
@@ -58,6 +56,17 @@ def load_and_prepare_survey_data():
     if 'Genero' in df.columns:
         df['Genero_Desc'] = df['Genero'].map(genero_map)
 
+    # Mapeamento de cursos (ajuste os nomes conforme necessário)
+    curso_map = {
+        1: 'Curso 1',  # Ajuste para o nome real do curso
+        2: 'Curso 2',  # Ajuste para o nome real do curso
+        3: 'Curso 3'   # Ajuste para o nome real do curso
+    }
+    if 'Curso' in df.columns:
+        df['Curso_Desc'] = df['Curso'].map(curso_map)
+        # Se não tiver mapeamento, usar o valor original
+        df['Curso_Desc'] = df['Curso_Desc'].fillna(df['Curso'])
+
     likert_map = {
         1: 'Discordo Fortemente', 2: 'Discordo', 3: 'Neutro', 4: 'Concordo', 5: 'Concordo Fortemente'
     }
@@ -72,26 +81,30 @@ def load_and_prepare_survey_data():
         if col_orig in df.columns:
             df[col_desc] = df[col_orig].map(likert_map)
 
+    # Converter GPA para numérico se existir
+    if 'GPA' in df.columns:
+        df['GPA'] = pd.to_numeric(df['GPA'], errors='coerce')
+
+    # Converter Exames_Aprovados para numérico se existir
+    if 'Exames_Aprovados' in df.columns:
+        df['Exames_Aprovados'] = pd.to_numeric(df['Exames_Aprovados'], errors='coerce')
+
     return df
 
 # Função para carregar e preparar os dados do Impact_AI_v2.csv
 @st.cache_data
 def load_and_prepare_impact_data():
-    # O arquivo Impact_AI_v2.csv não foi fornecido diretamente, mas o código do notebook
-    # sugere que ele está em 'upload/Impact_AI_v2.csv'.
-    # O usuário deve colocar o arquivo 'Impact_AI_v2.csv' na pasta 'upload'
-    
     try:
+        # Caminho relativo: espera o arquivo na mesma pasta do app.py
         df = pd.read_csv('The impact of artificial intelligence on society.csv', encoding='utf-8')
     except FileNotFoundError:
-        st.error("Arquivo 'Impact_AI_v2.csv' não encontrado. Por favor, certifique-se de que ele está na pasta 'upload'.")
+        st.error("Arquivo 'The impact of artificial intelligence on society.csv' não encontrado. Coloque o arquivo na mesma pasta do app ou ajuste o caminho no código.")
         return None
     except Exception as e:
-        
         try:
             df = pd.read_csv('The impact of artificial intelligence on society.csv', encoding='latin-1')
         except Exception as e_latin:
-            st.error(f"Erro ao carregar 'Impact_AI_v2.csv' com latin-1: {e_latin}. Não foi possível carregar os dados.")
+            st.error(f"Erro ao carregar 'The impact of artificial intelligence on society.csv' com latin-1: {e_latin}. Não foi possível carregar os dados.")
             return None
 
     # Renomear e mapear colunas (baseado em graficos_output_impact_ai_v2.ipynb)
@@ -103,37 +116,52 @@ def load_and_prepare_impact_data():
         'Could artificial intelligence (AI) completely eliminate some professions?': 'Elimina_Profissões',
         'Do you think your own job could be affected by artificial intelligence (AI)?': 'Afeta_Emprego_Pessoal',
         'Do you believe that artificial intelligence (AI) should be limited by ethical rules?': 'Limites_Éticos',
-        'Could artificial intelligence (AI) one day become conscious like humans?': 'IA_Consciente'
+        'Could artificial intelligence (AI) one day become conscious like humans?': 'IA_Consciente',
+        'What is your occupation? (optional)': 'Profissao',
+        'How often do you use technological devices?': 'Frequencia_Dispositivos',
+        'Please rate how actively you use AI-powered products in your daily life on a scale from 1 to 5.': 'Uso_IA_Produtos'
     }
     
     cols_to_rename = {k: v for k, v in column_mapping.items() if k in df.columns}
     df.rename(columns=cols_to_rename, inplace=True)
 
     # Mapeamento de valores para melhor visualização
+    # Normalizamos espaços e consideramos todas as alternativas do questionário.
     confianca_map = {
         "I trust it": "Confio",
         "I don't trust it": "Não Confio",
-        "I'm undecided": "Indeciso"
+        "I don't trust it at all": "Não Confio",
+        "I'm undecided": "Neutro",
     }
     if 'Confiança_IA' in df.columns:
-        df['Confiança_IA_Desc'] = df['Confiança_IA'].map(confianca_map)
+        conf_norm = df['Confiança_IA'].astype(str).str.strip()
+        df['Confiança_IA_Desc'] = conf_norm.map(confianca_map)
 
     impacto_map = {
+        "Definitely beneficial": "Definitivamente Benéfica",
         "More beneficial than harmful": "Mais Benéfica",
-        "More harmful than beneficial": "Mais Prejudicial",
         "Both beneficial and harmful": "Ambos",
-        "I have no idea": "Não Sei"
+        "More harmful than beneficial": "Mais Prejudicial",
+        "Definitely harmful": "Definitivamente Prejudicial",
+        "I have no idea": "Não Sei",
     }
     if 'Impacto_Humanidade' in df.columns:
-        df['Impacto_Humanidade_Desc'] = df['Impacto_Humanidade'].map(impacto_map)
+        impacto_norm = df['Impacto_Humanidade'].astype(str).str.strip()
+        df['Impacto_Humanidade_Desc'] = impacto_norm.map(impacto_map)
 
     # Mapeamento para as colunas de concordância/discordância
-    agree_map = {
-        "Strongly Agree": "Concordo Fortemente",
-        "Agree": "Concordo",
-        
-        
-        
+    # Existem várias variações de texto no CSV original
+    # (ex.: "Strongly disagree", "I disagree"), então
+    # normalizamos tudo para minúsculas antes de mapear.
+    agree_map_normalized = {
+        "strongly agree": "Concordo Fortemente",
+        "agree": "Concordo",
+        # respostas neutras/indecisas serão exibidas como "Neutro" no gráfico
+        "i'm undecided": "Neutro",
+        "undecided": "Neutro",
+        "i disagree": "Discordo",
+        "disagree": "Discordo",
+        "strongly disagree": "Discordo Fortemente",
     }
     
     for col_orig, col_desc in [
@@ -141,7 +169,103 @@ def load_and_prepare_impact_data():
         ('Limites_Éticos', 'Limites_Éticos_Desc')
     ]:
         if col_orig in df.columns:
-            df[col_desc] = df[col_orig].map(agree_map)
+            # cria uma versão normalizada em minúsculas para mapear
+            normalized = df[col_orig].astype(str).str.strip().str.lower()
+            df[col_desc] = normalized.map(agree_map_normalized)
+
+    # Tradução das respostas sobre eliminação de profissões
+    elimina_prof_map = {
+        "Absolutely Can't handle it": "Com certeza não eliminará profissões",
+        "Can't handle it": "Provavelmente não eliminará profissões",
+        "Removes": "Eliminará algumas profissões",
+        "Definitely Removes": "Com certeza eliminará profissões",
+        "I have no idea": "Não sei se eliminará profissões",
+    }
+    if 'Elimina_Profissões' in df.columns:
+        df['Elimina_Profissões_Desc'] = df['Elimina_Profissões'].astype(str).str.strip().map(elimina_prof_map)
+
+    # Tradução das respostas sobre afetação do próprio emprego
+    afeta_emprego_map = {
+        "Definitely I don't think so": "Com certeza não será afetado",
+        "I don't think so": "Acho que não será afetado",
+        "I'm undecided": "Estou indeciso(a)",
+        "Think": "Talvez seja afetado",
+        "I definitely think": "Com certeza será afetado",
+    }
+    if 'Afeta_Emprego_Pessoal' in df.columns:
+        df['Afeta_Emprego_Pessoal_Desc'] = df['Afeta_Emprego_Pessoal'].astype(str).str.strip().map(afeta_emprego_map)
+
+    # Tradução das respostas sobre IA consciente
+    ia_consciente_map = {
+        "Becomes": "Sim, se tornará consciente",
+        "Definitely Becomes": "Com certeza se tornará consciente",
+        "Can't": "Não pode se tornar consciente",
+        "It certainly can't be": "Certamente não pode se tornar consciente",
+        "I'm undecided": "Estou indeciso(a)",
+    }
+    if 'IA_Consciente' in df.columns:
+        df['IA_Consciente_Desc'] = df['IA_Consciente'].astype(str).str.strip().map(ia_consciente_map)
+
+    # Tradução do nível de educação
+    educacao_map = {
+        "Primary education": "Ensino Fundamental",
+        "High school": "Ensino Médio",
+        "Bachelor's degree": "Graduação",
+        "n Bachelor's degree": "Em Graduação",
+    }
+    educ_col = 'What is your education level?'
+    if educ_col in df.columns:
+        df['Nivel_Educacao_Desc'] = df[educ_col].astype(str).str.strip().map(educacao_map)
+
+    # Tradução do status de emprego
+    emprego_map = {
+        "Student": "Estudante",
+        "Employed": "Empregado",
+        "Unemployed": "Desempregado",
+    }
+    status_col = 'What is your employment status?'
+    if status_col in df.columns:
+        df['Status_Emprego_Desc'] = df[status_col].astype(str).str.strip().map(emprego_map)
+
+    # Normalizar e traduzir profissões
+    if 'Profissao' in df.columns:
+        # Normalizar: remover espaços no início/fim, converter para minúsculas
+        df['Profissao_Normalizada'] = df['Profissao'].astype(str).str.strip().str.lower()
+        
+        # Mapeamento de tradução (baseado nos valores normalizados, sem espaços extras)
+        profissao_map = {
+            "student": "Estudante",
+            "engineer": "Engenheiro(a)",
+            "housewife": "Dona de Casa",
+            "teacher": "Professor(a)",
+            "textile": "Têxtil",
+            "sales & marketing": "Vendas e Marketing",
+            "sales &amp; marketing": "Vendas e Marketing",  # HTML encoded
+            "child development": "Desenvolvimento Infantil",
+            "accounting": "Contabilidade",
+            "office driver": "Motorista",
+            "merchandising": "Merchandising",
+            "real estate agent": "Corretor(a) de Imóveis",
+        }
+        
+        # Aplicar tradução
+        df['Profissao_Desc'] = df['Profissao_Normalizada'].map(profissao_map)
+        # Se não tiver tradução, usar o valor original capitalizado
+        df['Profissao_Desc'] = df['Profissao_Desc'].fillna(df['Profissao'].astype(str).str.strip().str.title())
+        
+        # Garantir que valores vazios sejam tratados como NA
+        df['Profissao_Desc'] = df['Profissao_Desc'].replace(['', 'nan', 'None'], pd.NA)
+
+    # Tradução da frequência de uso de dispositivos tecnológicos
+    if 'Frequencia_Dispositivos' in df.columns:
+        freq_map = {
+            "Between 0 to 2 hours per day": "0 a 2 horas por dia",
+            "Between 2 to 5 hours per day": "2 a 5 horas por dia",
+            "Between 5 to 10 hours per day": "5 a 10 horas por dia",
+            "More than 10 hours per day": "Mais de 10 horas por dia",
+        }
+        df['Frequencia_Dispositivos_Desc'] = df['Frequencia_Dispositivos'].astype(str).str.strip().map(freq_map)
+        df['Frequencia_Dispositivos_Desc'] = df['Frequencia_Dispositivos_Desc'].fillna(df['Frequencia_Dispositivos'])
 
     return df
 
@@ -212,6 +336,45 @@ def plot_sentimentos_ia(df):
     
     st.plotly_chart(fig, use_container_width=True)
 
+def plot_conhecimento_por_genero(df):
+    """Barras agrupadas: distribuição do nível de conhecimento de IA por gênero."""
+    if df is None or 'Conhecimento_IA' not in df.columns or 'Genero_Desc' not in df.columns:
+        st.warning("Dados para 'Conhecimento_IA' ou 'Gênero' não disponíveis.")
+        return
+
+    st.markdown("### 3. Perfil de Conhecimento sobre IA por Gênero")
+
+    # Criar tabela cruzada: gênero vs nível de conhecimento
+    cross = pd.crosstab(df['Genero_Desc'], df['Conhecimento_IA'])
+    
+    # Ordenar por nível de conhecimento
+    cross = cross.sort_index(axis=1)
+
+    fig = px.bar(
+        cross,
+        x=cross.index,
+        y=cross.columns,
+        title='Distribuição do Nível de Conhecimento sobre IA por Gênero',
+        labels={
+            'Genero_Desc': 'Gênero',
+            'value': 'Número de Respondentes',
+            'variable': 'Nível de Conhecimento (1-10)'
+        },
+        color_discrete_sequence=px.colors.sequential.Viridis,
+        barmode='group'
+    )
+
+    fig.update_layout(
+        template='plotly_dark',
+        xaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
 def plot_likert_scale(df, column, title):
     if df is None or column not in df.columns:
         st.warning(f"Dados para '{title}' não disponíveis.")
@@ -257,7 +420,7 @@ def plot_conhecimento_vs_sentimento(df):
     # Contar quantas pessoas estão em cada nível de conhecimento por sentimento
     df_count = df.groupby(['Sentimentos_IA_Desc', 'Conhecimento_IA']).size().reset_index(name='Quantidade')
     
-    # Criar gráfico de linha
+    # Criar gráfico de linha (estilo sugerido)
     fig = px.line(
         df_count,
         x='Conhecimento_IA',
@@ -265,11 +428,18 @@ def plot_conhecimento_vs_sentimento(df):
         color='Sentimentos_IA_Desc',
         markers=True,  # Adiciona pontos nas linhas
         title='Quantidade de Respondentes por Nível de Conhecimento e Sentimento',
-        labels={'Conhecimento_IA': 'Nível de Conhecimento (1-10)', 'Quantidade': 'Número de Pessoas', 'Sentimentos_IA_Desc': 'Sentimento'},
+        labels={
+            'Conhecimento_IA': 'Nível de Conhecimento (1-10)',
+            'Quantidade': 'Número de Pessoas',
+            'Sentimentos_IA_Desc': 'Sentimento'
+        },
         color_discrete_sequence=px.colors.qualitative.Set1
     )
     
-    fig.update_traces(mode='lines+markers', hovertemplate='<b>%{fullData.name}</b><br>Conhecimento: %{x}<br>Pessoas: %{y}<extra></extra>')
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>Conhecimento: %{x}<br>Pessoas: %{y}<extra></extra>'
+    )
     
     fig.update_layout(
         template='plotly_dark',
@@ -281,127 +451,6 @@ def plot_conhecimento_vs_sentimento(df):
     )
     
     st.plotly_chart(fig, use_container_width=True)
-    def plot_confianca_vs_conhecimento(df):
-        """
-        Gráfico que mostra a distribuição de Confiança em relação à IA
-        agrupada por Nível de Conhecimento
-        """
-    if df is None or 'Confiança_IA_Desc' not in df.columns or 'Conhecimento_IA' not in df.columns:
-        st.warning("Dados para 'Confiança_IA' ou 'Conhecimento_IA' não disponíveis.")
-        return
-    
-    st.markdown("### 10. Distribuição de Confiança na IA por Nível de Conhecimento")
-    
-    # Criar mapeamento de nível de conhecimento em categorias
-    def categorizar_conhecimento(valor):
-        if valor <= 2:
-            return 'Sem Conhecimento'
-        elif valor <= 4:
-            return 'Pouco Conhecimento'
-        elif valor <= 6:
-            return 'Conhecimento Básico'
-        elif valor <= 8:
-            return 'Bom Conhecimento'
-        else:
-            return 'Conhecimento Especialista'
-    
-    df['Conhecimento_Cat'] = df['Conhecimento_IA'].apply(categorizar_conhecimento)
-    
-    # Criar tabela de frequência cruzada
-    crosstab = pd.crosstab(
-        df['Conhecimento_Cat'],
-        df['Confiança_IA_Desc'],
-        normalize='index'
-    ) * 100
-    
-    # Reordenar as colunas de confiança
-    ordem_confianca = ['Não Confio', 'Indeciso', 'Confio']
-    crosstab = crosstab[[col for col in ordem_confianca if col in crosstab.columns]]
-    
-    # Reordenar as linhas
-    ordem_conhecimento = ['Sem Conhecimento', 'Pouco Conhecimento', 'Conhecimento Básico', 
-                          'Bom Conhecimento', 'Conhecimento Especialista']
-    crosstab = crosstab.reindex([cat for cat in ordem_conhecimento if cat in crosstab.index])
-    
-    # Cores semânticas
-    color_map = {
-        'Não Confio': '#d62728',   # Vermelho
-        'Indeciso': '#ffdd57',     # Amarelo
-        'Confio': '#7b3ff2'        # Roxo/Azul
-    }
-    
-    # Criar gráfico de barras empilhadas
-    fig = go.Figure()
-    
-    for confianca in ordem_confianca:
-        if confianca in crosstab.columns:
-            fig.add_trace(go.Bar(
-                x=crosstab.index,
-                y=crosstab[confianca],
-                name=confianca,
-                marker_color=color_map.get(confianca, '#gray'),
-                text=crosstab[confianca].round(1),
-                textposition='inside',
-                hovertemplate=f'<b>{confianca}</b><br>Percentagem: %{{y:.1f}}%<extra></extra>'
-            ))
-    
-    fig.update_layout(
-        barmode='stack',
-        title='Distribuição de Confiança na IA por Nível de Conhecimento',
-        xaxis_title='Nível de Conhecimento sobre IA',
-        yaxis_title='Percentagem (%)',
-        template='plotly_dark',
-        xaxis={'tickangle': -45},
-        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
-        plot_bgcolor='rgba(0, 0, 0, 0.1)',
-        paper_bgcolor='rgba(0, 4, 40, 0.3)',
-        font=dict(color='white', size=12),
-        hovermode='x unified',
-        height=500
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-def plot_distribuicao_faixa_etaria(df):
-    """
-    Gráfico de Pizza: Distribuição por Faixa Etária
-    Adaptado para o seu dashboard
-    """
-    if df is None or 'What is your age range?' not in df.columns:
-        st.warning("Dados para 'Faixa Etária' não disponíveis.")
-        return
-    
-    st.markdown("### 11. Distribuição dos Respondentes por Faixa Etária")
-    
-    # Contagem de frequência
-    age_counts = df['What is your age range?'].value_counts()
-    
-    # Criar gráfico de pizza
-    fig = px.pie(
-        names=age_counts.index,
-        values=age_counts.values,
-        title='📊 Distribuição por Faixa Etária',
-        hole=0.4,  # Gráfico de Rosca
-        color_discrete_sequence=px.colors.qualitative.Set3
-    )
-    
-    fig.update_traces(
-        textinfo='percent+label',
-        pull=[0.05] * len(age_counts),  # Leve separação dos segmentos
-        hovertemplate='<b>%{label}</b><br>Respondentes: %{value}<br>Percentagem: %{percent}<extra></extra>'
-    )
-    
-    fig.update_layout(
-        template='plotly_dark',
-        plot_bgcolor='rgba(0, 0, 0, 0.1)',
-        paper_bgcolor='rgba(0, 4, 40, 0.3)',
-        font=dict(color='white', size=12),
-        height=500
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-
-
 
 # ==============================================================================
 # GRÁFICOS DO IMPACT_AI_V2 (Notebook 2)
@@ -438,6 +487,551 @@ def plot_confianca_ia(df):
     
     st.plotly_chart(fig, use_container_width=True)
 
+def plot_uso_ia_vs_confianca(df):
+    """Barras agrupadas: distribuição do uso de produtos de IA por nível de confiança."""
+    if df is None or 'Confiança_IA_Desc' not in df.columns or 'Uso_IA_Produtos' not in df.columns:
+        st.warning("Dados para 'Confiança_IA' ou 'Uso_IA_Produtos' não disponíveis.")
+        return
+
+    st.markdown("### 9. Uso Ativo de Produtos de IA vs Nível de Confiança")
+
+    # Converter uso de IA para numérico se necessário
+    df_clean = df.copy()
+    if df_clean['Uso_IA_Produtos'].dtype == 'object':
+        df_clean['Uso_IA_Produtos'] = pd.to_numeric(df_clean['Uso_IA_Produtos'], errors='coerce')
+
+    # Filtrar valores válidos
+    df_clean = df_clean[df_clean['Uso_IA_Produtos'].notna() & df_clean['Confiança_IA_Desc'].notna()]
+
+    if len(df_clean) == 0:
+        st.warning("Não há dados válidos para exibir o gráfico.")
+        return
+
+    # Criar categorias de uso de IA para melhor visualização
+    df_clean['Uso_IA_Categoria'] = pd.cut(
+        df_clean['Uso_IA_Produtos'],
+        bins=[0, 1, 2, 3, 4, 5],
+        labels=['Muito Baixo (1)', 'Baixo (2)', 'Médio (3)', 'Alto (4)', 'Muito Alto (5)'],
+        include_lowest=True
+    )
+
+    # Criar tabela cruzada
+    cross = pd.crosstab(df_clean['Confiança_IA_Desc'], df_clean['Uso_IA_Categoria'])
+
+    # Ordem das categorias de uso
+    ordem_uso = ['Muito Baixo (1)', 'Baixo (2)', 'Médio (3)', 'Alto (4)', 'Muito Alto (5)']
+    cross = cross.reindex(columns=ordem_uso, fill_value=0)
+
+    fig = px.bar(
+        cross,
+        x=cross.index,
+        y=cross.columns,
+        title='Distribuição do Uso de Produtos de IA por Nível de Confiança',
+        labels={
+            'Confiança_IA_Desc': 'Nível de Confiança na IA',
+            'value': 'Número de Respondentes',
+            'variable': 'Nível de Uso de Produtos de IA'
+        },
+        color_discrete_sequence=px.colors.sequential.Viridis,
+        barmode='group'
+    )
+
+    fig.update_layout(
+        template='plotly_dark',
+        xaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_profissoes_vs_emprego(df):
+    """
+    Barras empilhadas: faixa etária vs crença de que a IA vai eliminar profissões.
+    Mostra, para cada faixa de idade, como se distribuem as respostas sobre
+    eliminação de profissões.
+    """
+    idade_col = 'What is your age range?'
+    if df is None or 'Elimina_Profissões_Desc' not in df.columns or idade_col not in df.columns:
+        st.warning("Dados para idade ou para eliminação de profissões não disponíveis.")
+        return
+
+    st.markdown("### 10. Idade vs Crença na Eliminação de Profissões pela IA")
+
+    # Tabela cruzada em porcentagem por faixa etária
+    cross = pd.crosstab(df[idade_col], df['Elimina_Profissões_Desc'], normalize='index') * 100
+    cross = cross.round(1)
+
+    fig = px.bar(
+        cross,
+        x=cross.index,
+        y=cross.columns,
+        title='Percepção de Eliminação de Profissões pela IA por Faixa Etária',
+        labels={
+            'index': 'Faixa etária',
+            'value': 'Percentual dentro de cada faixa etária'
+        },
+        color_discrete_sequence=px.colors.sequential.Plasma
+    )
+
+    fig.update_layout(
+        template='plotly_dark',
+        barmode='stack',
+        xaxis={'title': 'Faixa etária'},
+        yaxis={
+            'gridcolor': 'rgba(255,255,255,0.1)',
+            'title': 'Percentual dentro de cada faixa etária'
+        },
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_impacto_por_conhecimento(df):
+    """Impacto percebido da IA na humanidade por nível de conhecimento (faixas)."""
+    if df is None or 'Conhecimento_IA' not in df.columns or 'Impacto_Humanidade_Desc' not in df.columns:
+        st.warning("Dados para 'Conhecimento_IA' ou 'Impacto_Humanidade' não disponíveis.")
+        return
+
+    st.markdown("### 11. Impacto da IA na Humanidade por Nível de Conhecimento")
+
+    # Mapear conhecimento textual para faixas (Baixo/Médio/Alto)
+    conhec_raw = df['Conhecimento_IA'].astype(str).str.strip()
+    baixa = ["I have no knowledge", "I've heard a little about it"]
+    media = ["I have basic knowledge"]
+    alta = ["I have a good level of knowledge"]
+
+    def map_conhecimento(val):
+        if val in baixa:
+            return "Baixo"
+        if val in media:
+            return "Médio"
+        if val in alta:
+            return "Alto"
+        return "Outro"
+
+    df_local = df.copy()
+    df_local['Conhecimento_IA_Faixa'] = conhec_raw.map(map_conhecimento)
+    # Manter apenas as faixas Baixo/Médio/Alto no gráfico
+    df_local = df_local[df_local['Conhecimento_IA_Faixa'].isin(['Baixo', 'Médio', 'Alto'])]
+
+    cross = pd.crosstab(df_local['Conhecimento_IA_Faixa'], df_local['Impacto_Humanidade_Desc'], normalize='index') * 100
+    cross = cross.round(1)
+
+    fig = px.bar(
+        cross,
+        x=cross.index,
+        y=cross.columns,
+        title='Percepção de Impacto da IA na Humanidade por Nível de Conhecimento',
+        labels={
+            'Conhecimento_IA_Faixa': 'Nível de Conhecimento em IA',
+            'value': 'Percentual dentro de cada faixa de conhecimento'
+        },
+        color_discrete_sequence=px.colors.sequential.Sunset
+    )
+
+    fig.update_layout(
+        template='plotly_dark',
+        barmode='stack',
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_curso_vs_substituicao_emprego(df):
+    """Barras agrupadas: curso vs percepção de substituição de empregos."""
+    if df is None or 'Curso_Desc' not in df.columns or 'Substituicao_Emprego_Desc' not in df.columns:
+        st.warning("Dados para 'Curso' ou 'Substituicao_Emprego' não disponíveis.")
+        return
+
+    st.markdown("### 12. Percepção de Substituição de Empregos por Curso")
+
+    # Criar tabela cruzada usando a coluna descritiva
+    cross = pd.crosstab(df['Curso_Desc'], df['Substituicao_Emprego_Desc'])
+    
+    # Ordem das categorias Likert
+    ordem_likert = ['Discordo Fortemente', 'Discordo', 'Neutro', 'Concordo', 'Concordo Fortemente']
+    cross = cross.reindex(columns=ordem_likert, fill_value=0)
+
+    fig = px.bar(
+        cross,
+        x=cross.index,
+        y=cross.columns,
+        title='Percepção de Substituição de Empregos pela IA por Curso',
+        labels={
+            'Curso': 'Curso',
+            'value': 'Número de Respondentes',
+            'variable': 'Nível de Concordância'
+        },
+        color_discrete_sequence=px.colors.sequential.Plasma,
+        barmode='group'
+    )
+
+    fig.update_layout(
+        template='plotly_dark',
+        xaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_gpa_vs_conhecimento(df):
+    """Scatter plot: GPA vs conhecimento sobre IA com linha de tendência."""
+    if df is None or 'GPA' not in df.columns or 'Conhecimento_IA' not in df.columns:
+        st.warning("Dados para 'GPA' ou 'Conhecimento_IA' não disponíveis.")
+        return
+
+    st.markdown("### 13. Relação entre GPA e Conhecimento sobre IA")
+
+    # Filtrar valores válidos
+    df_clean = df[df['GPA'].notna() & df['Conhecimento_IA'].notna()].copy()
+    
+    if len(df_clean) == 0:
+        st.warning("Não há dados válidos para exibir o gráfico.")
+        return
+
+    # Criar scatter plot sem trendline (para evitar dependência de statsmodels)
+    fig = px.scatter(
+        df_clean,
+        x='GPA',
+        y='Conhecimento_IA',
+        title='Relação entre GPA e Nível de Conhecimento sobre IA',
+        labels={
+            'GPA': 'GPA (Grade Point Average)',
+            'Conhecimento_IA': 'Nível de Conhecimento sobre IA (1-10)'
+        },
+        color='Conhecimento_IA',
+        color_continuous_scale=px.colors.sequential.Viridis
+    )
+
+    # Adicionar linha de tendência simples usando numpy (sem statsmodels)
+    if len(df_clean) > 1:
+        x_vals = df_clean['GPA'].values
+        y_vals = df_clean['Conhecimento_IA'].values
+        
+        # Calcular regressão linear simples
+        coeffs = np.polyfit(x_vals, y_vals, 1)
+        line_x = np.linspace(x_vals.min(), x_vals.max(), 100)
+        line_y = np.polyval(coeffs, line_x)
+        
+        # Adicionar linha de tendência ao gráfico
+        fig.add_trace(go.Scatter(
+            x=line_x,
+            y=line_y,
+            mode='lines',
+            name='Linha de Tendência',
+            line=dict(color='#0099ff', width=2, dash='dash'),
+            showlegend=True
+        ))
+
+    fig.update_layout(
+        template='plotly_dark',
+        xaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)', 'dtick': 1},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_fontes_ia(df):
+    """Gráfico de barras: fontes de informação sobre IA."""
+    if df is None:
+        st.warning("Dados não disponíveis.")
+        return
+
+    st.markdown("### 14. Fontes de Informação sobre IA")
+
+    # Verificar se as colunas de fontes existem
+    fontes_cols = {
+        'Internet': 'Q2#1.Internet',
+        'Livros/Artigos': 'Q2#2.Books/Papers',
+        'Redes Sociais': 'Q2#3.Social_media',
+        'Discussões': 'Q2#4.Discussions',
+        'Não me informo': 'Q2#5.NotInformed'
+    }
+
+    # Contar quantas pessoas usam cada fonte
+    fontes_counts = {}
+    for nome_pt, col_orig in fontes_cols.items():
+        if col_orig in df.columns:
+            # Contar quantos têm valor 1 (usam essa fonte)
+            count = (df[col_orig] == 1).sum()
+            fontes_counts[nome_pt] = count
+
+    if len(fontes_counts) == 0:
+        st.warning("Dados de fontes de informação sobre IA não disponíveis.")
+        return
+
+    # Criar DataFrame para o gráfico
+    df_fontes = pd.DataFrame({
+        'Fonte': list(fontes_counts.keys()),
+        'Quantidade': list(fontes_counts.values())
+    }).sort_values('Quantidade', ascending=False)
+
+    # Criar gráfico de barras
+    fig = px.bar(
+        df_fontes,
+        x='Fonte',
+        y='Quantidade',
+        title='Fontes de Informação sobre IA Utilizadas pelos Respondentes',
+        labels={
+            'Fonte': 'Fonte de Informação',
+            'Quantidade': 'Número de Respondentes'
+        },
+        color='Quantidade',
+        color_continuous_scale=px.colors.sequential.Plasma
+    )
+
+    fig.update_layout(
+        template='plotly_dark',
+        xaxis={'gridcolor': 'rgba(255,255,255,0.1)', 'tickangle': -45},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12),
+        showlegend=False
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_limites_eticos_vs_ia_consciente(df):
+    """Barras empilhadas: limites éticos vs crença em IA consciente."""
+    if df is None or 'Limites_Éticos_Desc' not in df.columns or 'IA_Consciente_Desc' not in df.columns:
+        st.warning("Dados para 'Limites_Éticos' ou 'IA_Consciente' não disponíveis.")
+        return
+
+    st.markdown("### 14. Limites Éticos vs Crença em IA Consciente")
+
+    cross = pd.crosstab(df['Limites_Éticos_Desc'], df['IA_Consciente_Desc'], normalize='index') * 100
+    cross = cross.round(1)
+
+    fig = px.bar(
+        cross,
+        x=cross.index,
+        y=cross.columns,
+        title='Crença em Limites Éticos para IA vs Crença em IA Consciente',
+        labels={
+            'Limites_Éticos_Desc': 'Posição sobre Limites Éticos',
+            'value': 'Percentual dentro de cada posição sobre limites éticos',
+            'variable': 'Crença em IA Consciente'
+        },
+        color_discrete_sequence=px.colors.sequential.Mint
+    )
+
+    fig.update_layout(
+        template='plotly_dark',
+        barmode='stack',
+        xaxis={'categoryorder': 'array', 'categoryarray': ['Discordo Fortemente', 'Discordo', 'Neutro', 'Concordo', 'Concordo Fortemente']},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_educacao_vs_confianca(df):
+    """Barras empilhadas: nível de educação vs confiança em IA."""
+    if df is None or 'Nivel_Educacao_Desc' not in df.columns or 'Confiança_IA_Desc' not in df.columns:
+        st.warning("Dados para 'Nível de Educação' ou 'Confiança_IA' não disponíveis.")
+        return
+
+    st.markdown("### 15. Nível de Educação vs Confiança em IA")
+
+    cross = pd.crosstab(df['Nivel_Educacao_Desc'], df['Confiança_IA_Desc'], normalize='index') * 100
+    cross = cross.round(1)
+
+    fig = px.bar(
+        cross,
+        x=cross.index,
+        y=cross.columns,
+        title='Confiança em IA por Nível de Educação',
+        labels={
+            'Nivel_Educacao_Desc': 'Nível de Educação',
+            'value': 'Percentual dentro de cada nível de educação',
+            'variable': 'Nível de Confiança'
+        },
+        color_discrete_sequence=px.colors.sequential.Sunset
+    )
+
+    fig.update_layout(
+        template='plotly_dark',
+        barmode='stack',
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_status_emprego_vs_risco(df):
+    """Barras empilhadas: status de emprego vs risco ao próprio emprego."""
+    if df is None or 'Status_Emprego_Desc' not in df.columns or 'Afeta_Emprego_Pessoal_Desc' not in df.columns:
+        st.warning("Dados para 'Status de Emprego' ou 'Afeta_Emprego_Pessoal' não disponíveis.")
+        return
+
+    st.markdown("### 16. Status de Emprego vs Percepção de Risco ao Próprio Emprego")
+
+    cross = pd.crosstab(df['Status_Emprego_Desc'], df['Afeta_Emprego_Pessoal_Desc'], normalize='index') * 100
+    cross = cross.round(1)
+
+    fig = px.bar(
+        cross,
+        x=cross.index,
+        y=cross.columns,
+        title='Percepção de Risco ao Próprio Emprego por Status de Emprego',
+        labels={
+            'Status_Emprego_Desc': 'Status de Emprego',
+            'value': 'Percentual dentro de cada status de emprego',
+            'variable': 'Percepção de Risco'
+        },
+        color_discrete_sequence=px.colors.sequential.Plasma
+    )
+
+    fig.update_layout(
+        template='plotly_dark',
+        barmode='stack',
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_profissao_vs_risco_emprego(df):
+    """Barras empilhadas: profissão vs percepção de risco ao próprio emprego."""
+    if df is None or 'Profissao_Desc' not in df.columns or 'Afeta_Emprego_Pessoal_Desc' not in df.columns:
+        st.warning("Dados para 'Profissão' ou 'Afeta_Emprego_Pessoal' não disponíveis.")
+        return
+
+    st.markdown("### 17. Profissão vs Percepção de Risco ao Próprio Emprego")
+
+    # Filtrar apenas linhas com profissão informada (não vazia)
+    df_clean = df[df['Profissao_Desc'].notna() & (df['Profissao_Desc'].astype(str).str.strip() != '')].copy()
+    
+    if len(df_clean) == 0:
+        st.warning("Não há dados de profissão disponíveis para exibir o gráfico.")
+        return
+
+    # Limitar a profissões com pelo menos 3 respondentes para melhor visualização
+    profissao_counts = df_clean['Profissao_Desc'].value_counts()
+    profissoes_frequentes = profissao_counts[profissao_counts >= 3].index
+    df_clean = df_clean[df_clean['Profissao_Desc'].isin(profissoes_frequentes)]
+
+    if len(df_clean) == 0:
+        st.warning("Não há profissões com número suficiente de respondentes para exibir o gráfico.")
+        return
+
+    # Criar tabela cruzada usando a coluna traduzida
+    cross = pd.crosstab(df_clean['Profissao_Desc'], df_clean['Afeta_Emprego_Pessoal_Desc'], normalize='index') * 100
+    cross = cross.round(1)
+
+    # Ordenar profissões por frequência (mais respondentes primeiro)
+    ordem_profissoes = df_clean['Profissao_Desc'].value_counts().index
+    cross = cross.reindex(ordem_profissoes)
+
+    fig = px.bar(
+        cross,
+        x=cross.index,
+        y=cross.columns,
+        title='Percepção de Risco ao Próprio Emprego por Profissão',
+        labels={
+            'Profissao': 'Profissão',
+            'value': 'Percentual dentro de cada profissão',
+            'variable': 'Percepção de Risco'
+        },
+        color_discrete_sequence=px.colors.sequential.Plasma
+    )
+
+    fig.update_layout(
+        template='plotly_dark',
+        barmode='stack',
+        xaxis={'gridcolor': 'rgba(255,255,255,0.1)', 'tickangle': -45},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12),
+        height=500
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_dispositivos_vs_uso_ia(df):
+    """Barras agrupadas: frequência de uso de dispositivos tecnológicos vs uso de produtos de IA."""
+    if df is None or 'Frequencia_Dispositivos_Desc' not in df.columns or 'Uso_IA_Produtos' not in df.columns:
+        st.warning("Dados para 'Frequencia_Dispositivos' ou 'Uso_IA_Produtos' não disponíveis.")
+        return
+
+    st.markdown("### 18. Frequência de Uso de Dispositivos Tecnológicos vs Uso de Produtos de IA")
+
+    # Filtrar valores válidos
+    df_clean = df[df['Frequencia_Dispositivos_Desc'].notna() & df['Uso_IA_Produtos'].notna()].copy()
+    
+    if len(df_clean) == 0:
+        st.warning("Não há dados válidos para exibir o gráfico.")
+        return
+
+    # Converter uso de IA para numérico se necessário
+    if df_clean['Uso_IA_Produtos'].dtype == 'object':
+        df_clean['Uso_IA_Produtos'] = pd.to_numeric(df_clean['Uso_IA_Produtos'], errors='coerce')
+
+    # Criar categorias de uso de IA para melhor visualização
+    df_clean['Uso_IA_Categoria'] = pd.cut(
+        df_clean['Uso_IA_Produtos'],
+        bins=[0, 1, 2, 3, 4, 5],
+        labels=['Muito Baixo (1)', 'Baixo (2)', 'Médio (3)', 'Alto (4)', 'Muito Alto (5)'],
+        include_lowest=True
+    )
+
+    # Criar tabela cruzada
+    cross = pd.crosstab(df_clean['Frequencia_Dispositivos_Desc'], df_clean['Uso_IA_Categoria'], normalize='index') * 100
+    cross = cross.round(1)
+
+    # Ordem das frequências de dispositivos
+    ordem_freq = ["0 a 2 horas por dia", "2 a 5 horas por dia", "5 a 10 horas por dia", "Mais de 10 horas por dia"]
+    ordem_freq = [f for f in ordem_freq if f in cross.index]
+    cross = cross.reindex(ordem_freq)
+
+    fig = px.bar(
+        cross,
+        x=cross.index,
+        y=cross.columns,
+        title='Distribuição do Uso de Produtos de IA por Frequência de Uso de Dispositivos Tecnológicos',
+        labels={
+            'Frequencia_Dispositivos_Desc': 'Frequência de Uso de Dispositivos Tecnológicos',
+            'value': 'Percentual dentro de cada frequência de uso',
+            'variable': 'Nível de Uso de Produtos de IA'
+        },
+        color_discrete_sequence=px.colors.sequential.Viridis
+    )
+
+    fig.update_layout(
+        template='plotly_dark',
+        barmode='stack',
+        xaxis={'gridcolor': 'rgba(255,255,255,0.1)', 'tickangle': -45},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12),
+        height=500
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
 def plot_impacto_humanidade(df):
     if df is None or 'Impacto_Humanidade_Desc' not in df.columns:
         st.warning("Dados para 'Impacto_Humanidade' não disponíveis.")
@@ -446,267 +1040,64 @@ def plot_impacto_humanidade(df):
     st.markdown("### 7. Percepção do Impacto da IA na Humanidade")
     
     # Contagem de frequência
-    impacto_counts = df['Impacto_Humanidade_Desc'].value_counts().reset_index()
-    impacto_counts.columns = ['Impacto', 'Quantidade']
+    impacto_counts = df['Impacto_Humanidade_Desc'].value_counts()
     
-    # Calcular percentual
-    impacto_counts['Percentual'] = (impacto_counts['Quantidade'] / impacto_counts['Quantidade'].sum() * 100).round(1)
-    
-    # Ordenar para visualização (maior para menor)
-    impacto_counts = impacto_counts.sort_values('Quantidade', ascending=True)
-    
-    # Criar texto customizado para mostrar quantidade e percentual
-    impacto_counts['Label'] = impacto_counts.apply(
-        lambda row: f"{row['Quantidade']} respondentes ({row['Percentual']}%)", 
-        axis=1
-    )
-    
-    # Criar gráfico de barras horizontal
-    fig = px.bar(
-        impacto_counts,
-        y='Impacto',
-        x='Quantidade',
-        orientation='h',
-        color='Quantidade',
-        color_continuous_scale='Plasma',
-        title='O que os respondentes acham sobre o Impacto da IA na Humanidade?',
-        labels={'Quantidade': 'Número de Respondentes', 'Impacto': 'Percepção'},
-        text='Label'  # Mostra rótulo customizado
-    )
-    
-    fig.update_traces(textposition='outside', hovertemplate='<b>%{y}</b><br>Respondentes: %{x}<extra></extra>')
-    
-    fig.update_layout(
-        template='plotly_dark',
-        xaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
-        plot_bgcolor='rgba(0, 0, 0, 0.1)',
-        paper_bgcolor='rgba(0, 4, 40, 0.3)',
-        font=dict(color='white', size=12),
-        showlegend=False,
-        height=400
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-def plot_ameaca_liberdades(df):
-    if df is None or 'Ameaça_Liberdades_Desc' not in df.columns:
-        st.warning("Dados para 'Ameaça_Liberdades' não disponíveis.")
-        return
-    
-    st.markdown("### 9. Ameaça às Liberdades Individuais pela IA")
-    
-    # Definir a ordem correta para a escala Likert
-    order = ['Discordo Fortemente', 'Discordo', 'Indeciso', 'Concordo', 'Concordo Fortemente']
-    
-    # Contagem de frequência
-    counts = df['Ameaça_Liberdades_Desc'].value_counts().reindex(order).fillna(0).reset_index()
-    counts.columns = ['Resposta', 'Quantidade']
-    
-    # Calcular percentual
-    total = counts['Quantidade'].sum()
-    counts['Percentual'] = (counts['Quantidade'] / total * 100).round(1)
-    counts['Label'] = counts.apply(lambda x: f"{x['Quantidade']} ({x['Percentual']}%)", axis=1)
-    
-    # Cores Semânticas (Traffic Light)
-    color_map = {
-        'Concordo': '#ff7f0e',             # Laranja
-        'Concordo Fortemente': '#d62728'   # Vermelho (é ameaça)
-    }
-    
-    fig = px.bar(
-        counts,
-        y='Resposta',
-        x='Quantidade',
-        orientation='h',
-        color='Resposta',
-        color_discrete_map=color_map,
-        text='Label',
-        title='A IA ameaça as liberdades individuais?',
-        labels={'Quantidade': 'Número de Respondentes', 'Resposta': 'Opinião'}
-    )
-    
-    fig.update_traces(textposition='outside', hovertemplate='<b>%{y}</b><br>Respondentes: %{x}<extra></extra>')
-    
-    fig.update_layout(
-        template='plotly_dark',
-        xaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
-        plot_bgcolor='rgba(0, 0, 0, 0.1)',
-        paper_bgcolor='rgba(0, 4, 40, 0.3)',
-        font=dict(color='white', size=12),
-        showlegend=False,
-        height=400
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-def plot_distribuicao_faixa_etaria(df):
-    if df is None or 'What is your age range?' not in df.columns:
-        st.warning("Dados para 'Faixa Etária' não disponíveis.")
-        return
-    
-    st.markdown("### 11. Distribuição dos Respondentes por Faixa Etária")
-    
-    # Contagem de frequência
-    age_counts = df['What is your age range?'].value_counts()
-    
-    # Criar gráfico de pizza
+    # Criar o gráfico de pizza com Plotly
     fig = px.pie(
-        names=age_counts.index,
-        values=age_counts.values,
-        title='📊 Distribuição por Faixa Etária',
-        hole=0.4,  # Gráfico de Rosca
-        color_discrete_sequence=px.colors.qualitative.Set3
+        impacto_counts,
+        names=impacto_counts.index,
+        values=impacto_counts.values,
+        title='Percepção do Impacto da IA na Humanidade',
+        hole=0.4,
+        color_discrete_sequence=px.colors.sequential.Agsunset
     )
     
-    fig.update_traces(
-        textinfo='percent+label',
-        pull=[0.05] * len(age_counts),  # Leve separação dos segmentos
-        hovertemplate='<b>%{label}</b><br>Respondentes: %{value}<br>Percentagem: %{percent}<extra></extra>'
-    )
+    fig.update_traces(textinfo='percent+label', pull=[0.1, 0, 0, 0])
     
     fig.update_layout(
         template='plotly_dark',
         plot_bgcolor='rgba(0, 0, 0, 0.1)',
         paper_bgcolor='rgba(0, 4, 40, 0.3)',
-        font=dict(color='white', size=12),
-        height=500
+        font=dict(color='white', size=12)
     )
     
     st.plotly_chart(fig, use_container_width=True)
-def plot_confianca_vs_conhecimento(df):
-    if df is None or 'Confiança_IA_Desc' not in df.columns or 'Conhecimento_IA' not in df.columns:
-        st.warning("Dados para 'Confiança_IA' ou 'Conhecimento_IA' não disponíveis.")
-        return
-    
-    st.markdown("### 10. Distribuição de Confiança na IA por Nível de Conhecimento")
-    
-    # Criar mapeamento de nível de conhecimento em categorias
-    def categorizar_conhecimento(valor):
-        if valor <= 2:
-            return 'Sem Conhecimento'
-        elif valor <= 4:
-            return 'Pouco Conhecimento'
-        elif valor <= 6:
-            return 'Conhecimento Básico'
-        elif valor <= 8:
-            return 'Bom Conhecimento'
-        else:
-            return 'Conhecimento Especialista'
-    
-    df['Conhecimento_Cat'] = df['Conhecimento_IA'].apply(categorizar_conhecimento)
-    
-    # Criar tabela de frequência cruzada
-    crosstab = pd.crosstab(
-        df['Conhecimento_Cat'],
-        df['Confiança_IA_Desc'],
-        normalize='index'
-    ) * 100
-    
-    # Reordenar as colunas de confiança
-    ordem_confianca = ['Não Confio', 'Indeciso', 'Confio']
-    crosstab = crosstab[[col for col in ordem_confianca if col in crosstab.columns]]
-    
-    # Reordenar as linhas
-    ordem_conhecimento = ['Sem Conhecimento', 'Pouco Conhecimento', 'Conhecimento Básico', 
-                          'Bom Conhecimento', 'Conhecimento Especialista']
-    crosstab = crosstab.reindex([cat for cat in ordem_conhecimento if cat in crosstab.index])
-    
-    # Cores semânticas
-    color_map = {
-        'Não Confio': '#d62728',   # Vermelho
-        'Indeciso': '#ffdd57',     # Amarelo
-        'Confio': '#7b3ff2'        # Roxo/Azul
-    }
-    
-    # Criar gráfico de barras empilhadas
-    fig = go.Figure()
-    
-    for confianca in ordem_confianca:
-        if confianca in crosstab.columns:
-            fig.add_trace(go.Bar(
-                x=crosstab.index,
-                y=crosstab[confianca],
-                name=confianca,
-                marker_color=color_map.get(confianca, '#gray'),
-                text=crosstab[confianca].round(1),
-                textposition='inside',
-                hovertemplate=f'<b>{confianca}</b><br>Percentagem: %{{y:.1f}}%<extra></extra>'
-            ))
-    
-    fig.update_layout(
-        barmode='stack',
-        title='Distribuição de Confiança na IA por Nível de Conhecimento',
-        xaxis_title='Nível de Conhecimento sobre IA',
-        yaxis_title='Percentagem (%)',
-        template='plotly_dark',
-        xaxis={'tickangle': -45},
-        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
-        plot_bgcolor='rgba(0, 0, 0, 0.1)',
-        paper_bgcolor='rgba(0, 4, 40, 0.3)',
-        font=dict(color='white', size=12),
-        hovermode='x unified',
-        height=500
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-
-
-
 
 def plot_limites_eticos(df):
     if df is None or 'Limites_Éticos_Desc' not in df.columns:
         st.warning("Dados para 'Limites_Éticos' não disponíveis.")
         return
     
-    st.markdown("### 8. Consenso sobre Limites Éticos para a IA")
+    st.markdown("### 8. Crença na Necessidade de Limites Éticos para a IA")
     
-    # Ordem lógica
-    order = ['Indeciso', 'Concordo', 'Concordo Fortemente']
+    # Definir a ordem correta para a escala Likert
+    # Usamos "Neutro" para manter consistência com o restante dos gráficos.
+    order = ['Discordo Fortemente', 'Discordo', 'Neutro', 'Concordo', 'Concordo Fortemente']
     
-    # Contagem
-    counts = df['Limites_Éticos_Desc'].value_counts().reindex(order).fillna(0).reset_index()
-    counts.columns = ['Resposta', 'Quantidade']
+    # Contagem de frequência
+    counts = df['Limites_Éticos_Desc'].value_counts().reindex(order).fillna(0)
     
-    # Calcular percentual para o rótulo
-    total = counts['Quantidade'].sum()
-    counts['Percentual'] = (counts['Quantidade'] / total * 100).round(1)
-    counts['Label'] = counts.apply(lambda x: f"{x['Quantidade']} ({x['Percentual']}%)", axis=1)
-    
-    # Cores Semânticas (Traffic Light)
-    color_map = {
-        'Indeciso': '#7f7f7f',            # Cinza
-        'Concordo': '#2ca02c',            # Verde
-        'Concordo Fortemente': '#1f77b4'  # Azul ou Verde Escuro (#006400)
-    }
-
-    # Ajustando para Verde Escuro no Concordo Fortemente para ficar mais intuitivo
-    color_map['Concordo Fortemente'] = '#006400' 
-    
+    # Criar o gráfico de barras com Plotly
     fig = px.bar(
         counts,
-        y='Resposta',
-        x='Quantidade',
-        orientation='h', # Horizontal facilita a leitura dos rótulos longos
-        color='Resposta',
-        color_discrete_map=color_map,
-        text='Label',
+        x=counts.index,
+        y=counts.values,
+        labels={'x': 'Nível de Concordância', 'y': 'Contagem de Respondentes'},
         title='A IA deve ser limitada por regras éticas?',
-        labels={'Quantidade': 'Número de Respondentes', 'Resposta': 'Opinião'}
+        color=counts.values,
+        color_continuous_scale=px.colors.sequential.Mint
     )
     
     fig.update_layout(
         template='plotly_dark',
-        xaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        xaxis={'categoryorder': 'array', 'categoryarray': order},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
         plot_bgcolor='rgba(0, 0, 0, 0.1)',
         paper_bgcolor='rgba(0, 4, 40, 0.3)',
-        font=dict(color='white', size=12),
-        showlegend=False,
-        height=400
+        font=dict(color='white', size=12)
     )
     
     st.plotly_chart(fig, use_container_width=True)
-
 
 # ==============================================================================
 # FUNÇÃO PRINCIPAL PARA A PÁGINA DE GRÁFICOS
@@ -738,22 +1129,25 @@ def show_graficos_page():
             plot_sentimentos_ia(df_survey)
             plot_likert_scale(df_survey, 'Substituicao_Emprego_Desc', '3. Percepção sobre Substituição de Empregos pela IA')
             plot_likert_scale(df_survey, 'Crescimento_Economico_Desc', '4. Percepção sobre Crescimento Econômico pela IA')
+            plot_conhecimento_por_genero(df_survey)
             plot_conhecimento_vs_sentimento(df_survey)
+            plot_gpa_vs_conhecimento(df_survey)
+            plot_fontes_ia(df_survey)
         else:
             st.error("Não foi possível carregar os dados da Pesquisa Acadêmica. Verifique o arquivo 'Survey_AI.csv'.")
 
     with tab_impact:
         st.markdown("## Resultados da Pesquisa de Impacto Geral (Impact_AI_v2)")
-    if df_impact is not None:
-        plot_confianca_ia(df_impact)
-        plot_impacto_humanidade(df_impact)
-        plot_ameaca_liberdades(df_impact)
-        plot_limites_eticos(df_impact)
-        plot_confianca_vs_conhecimento(df_impact)  # ← NOVO
-        plot_distribuicao_faixa_etaria(df_impact)  # ← NOVO
-    else:
-        st.error("Não foi possível carregar os dados...")
-
+        if df_impact is not None:
+            plot_confianca_ia(df_impact)
+            plot_impacto_humanidade(df_impact)
+            plot_likert_scale(df_impact, 'Ameaça_Liberdades_Desc', '9. Ameaça às Liberdades Individuais pela IA')
+            plot_limites_eticos(df_impact)
+            plot_uso_ia_vs_confianca(df_impact)
+            plot_profissoes_vs_emprego(df_impact)
+            plot_impacto_por_conhecimento(df_impact)
+        else:
+            st.error("Não foi possível carregar os dados da Pesquisa de Impacto Geral. Verifique o arquivo 'Impact_AI_v2.csv'.")
 
 
 
@@ -1207,7 +1601,10 @@ elif pagina == "📊 Gráficos":
             plot_sentimentos_ia(df_survey)
             plot_likert_scale(df_survey, 'Substituicao_Emprego_Desc', '3. Percepção sobre Substituição de Empregos pela IA')
             plot_likert_scale(df_survey, 'Crescimento_Economico_Desc', '4. Percepção sobre Crescimento Econômico pela IA')
+            plot_conhecimento_por_genero(df_survey)
             plot_conhecimento_vs_sentimento(df_survey)
+            plot_gpa_vs_conhecimento(df_survey)
+            plot_fontes_ia(df_survey)
         else:
             st.error("Não foi possível carregar os dados da Pesquisa Acadêmica. Verifique o arquivo 'Survey_AI.csv'.")
 
@@ -1218,6 +1615,14 @@ elif pagina == "📊 Gráficos":
             plot_impacto_humanidade(df_impact)
             plot_likert_scale(df_impact, 'Ameaça_Liberdades_Desc', '9. Ameaça às Liberdades Individuais pela IA')
             plot_limites_eticos(df_impact)
+            plot_uso_ia_vs_confianca(df_impact)
+            plot_profissoes_vs_emprego(df_impact)
+            plot_impacto_por_conhecimento(df_impact)
+            plot_limites_eticos_vs_ia_consciente(df_impact)
+            plot_educacao_vs_confianca(df_impact)
+            plot_status_emprego_vs_risco(df_impact)
+            plot_profissao_vs_risco_emprego(df_impact)
+            plot_dispositivos_vs_uso_ia(df_impact)
         else:
             st.error("Não foi possível carregar os dados da Pesquisa de Impacto Geral. Verifique o arquivo 'Impact_AI_v2.csv'.")
 # ==================== PÁGINA: SOBRE =====================
@@ -1262,56 +1667,81 @@ elif pagina == "ℹ️ Sobre":
     col1, col2 = st.columns(2)
     
     with col1:
-        st.html("""
-        <div class="author-card">
-            <h3> Nicoli Felipe</h3>
-            <p>
-                <strong>Formação:</strong><br>
-                🎓 Graduanda em Ciência de Dados pela Faculdade SENAI de Informática (2025-2026)<br>
-                🎓 Graduanda em Informática para Negócios pela Fatec (2025-2027)<br>
-                🎓 Técnica em Administração pela ETEC de Mauá (2024)<br><br>
-                <strong>ORCID:</strong> 0009-0001-5123-5059<br>
-                📧 nicolifelipe01@gmail.com
-            </p>
-        </div>
-        """)
+        # Card Nicoli Felipe (imagem embutida em HTML para ficar dentro da caixa)
+        try:
+            with open("/Users/miriansanchesfiorini/Desktop/Arquivo 2/imagens/nicoli.felipe.jpg.jpeg", "rb") as f:
+                img_bytes = f.read()
+            img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+
+            nicoli_html = f"""
+            <div class="author-card">
+                <img src="data:image/jpeg;base64,{img_b64}" class="profile-img" />
+                <h3> Nicoli Felipe</h3>
+                <p>
+                    <strong>Formação:</strong><br>
+                    🎓 Graduanda em Ciência de Dados pela Faculdade SENAI de Informática (2025-2026)<br>
+                    🎓 Graduanda em Informática para Negócios pela Fatec (2025-2027)<br>
+                    🎓 Técnica em Administração pela ETEC de Mauá (2024)<br><br>
+                    <strong>ORCID:</strong> 0009-0001-5123-5059<br>
+                    📧 nicolifelipe01@gmail.com
+                </p>
+            </div>
+            """
+            st.markdown(nicoli_html, unsafe_allow_html=True)
+        except (FileNotFoundError, UnidentifiedImageError):
+            st.warning("Não foi possível carregar a imagem da autora Nicoli. Verifique se o arquivo '../nicoli.felipe.jpg.jpeg' existe e é uma imagem JPEG válida.")
     
     with col2:
-        st.markdown("""
-        <div class="author-card">
-            <h3> Mirian Sanches Fiorini</h3>
-            <p>
-                <strong>Formação:</strong><br>
+        # Card Mirian Sanches Fiorini (imagem embutida em HTML para ficar dentro da caixa)
+        try:
+            with open("/Users/miriansanchesfiorini/Desktop/Arquivo 2/imagens/mirian.sanches.jpg.jpeg", "rb") as f:
+                img_bytes = f.read()
+            img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+
+            mirian_html = f"""
+            <div class="author-card">
+                <img src="data:image/jpeg;base64,{img_b64}" class="profile-img" />
+                <h3> Mirian Sanches Fiorini</h3>
                 <p>
-                🎓 Graduanda em Ciência de Dados pela Faculdade SENAI de Informática (2025-2026)<br>
-                🎓 Técnica em Música pela Fundação das Artes (2022)<br><br>
-                <p>
-                <p>
-                <p>
-                <strong>ORCID:</strong> 0009-0003-1680-2542<br>
-                📧 sanchesmirian489@gmail.com
-                <p>
-                <p>
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+                    <strong>Formação:</strong><br>
+                    🎓 Graduanda em Ciência de Dados pela Faculdade SENAI de Informática (2025-2026)<br>
+                    🎓 Técnica em Música pela Fundação das Artes (2022)<br><br>
+                    <strong>ORCID:</strong> 0009-0003-1680-2542<br>
+                    📧 sanchesmirian489@gmail.com
+                </p>
+            </div>
+            """
+            st.markdown(mirian_html, unsafe_allow_html=True)
+        except (FileNotFoundError, UnidentifiedImageError):
+            st.warning("Não foi possível carregar a imagem da autora Mirian. Verifique se o arquivo '../mirian.sanches.jpg.jpeg' existe e é uma imagem JPEG válida.")
     
     # Sobre a Orientadora
-    st.markdown("""
-    <div class="author-card">
-        <h3> Jéssica Franzon Cruz do Espírito Santo (Orientadora)</h3>
-        <p>
-            <strong>Formação Acadêmica:</strong><br>
-            🎓 Bacharelado em Ciência da Computação (2018-2021) - Universidade Paulista (UNIP)<br>
-            🎓 Pós-graduação em Gestão Educacional na Perspectiva Inclusiva (2022) - Universidade Federal de Pelotas (UFPEL)<br>
-            🎓 Pós-graduação em Psicopedagogia (2024) - Faculdade das Américas (FAM)<br>
-            🎓 Mestranda em Engenharia da Informação - UFABC<br><br>
-            <strong>Atuação Profissional:</strong><br>
-            👨‍🏫 Professora na Faculdade SENAI (Campus Paulo Antônio Skaf) - Curso de Ciência de Dados<br>
-            💡 Especialista em educação inclusiva e psicopedagogia aplicada à tecnologia
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("## Sobre a Orientadora")
+    
+    try:
+        with open("/Users/miriansanchesfiorini/Desktop/Arquivo 2/imagens/WhatsApp Image 2025-11-29 at 05.51.35.jpeg", "rb") as f:
+            img_bytes = f.read()
+        img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+
+        jessica_html = f"""
+        <div class="author-card">
+            <img src="data:image/jpeg;base64,{img_b64}" class="profile-img" />
+            <h3> Jéssica Franzon Cruz do Espírito Santo (Orientadora)</h3>
+            <p>
+                <strong>Formação Acadêmica:</strong><br>
+                🎓 Bacharelado em Ciência da Computação (2018-2021) - Universidade Paulista (UNIP)<br>
+                🎓 Pós-graduação em Gestão Educacional na Perspectiva Inclusiva (2022) - Universidade Federal de Pelotas (UFPEL)<br>
+                🎓 Pós-graduação em Psicopedagogia (2024) - Faculdade das Américas (FAM)<br>
+                🎓 Mestranda em Engenharia da Informação - UFABC<br><br>
+                <strong>Atuação Profissional:</strong><br>
+                👨‍🏫 Professora na Faculdade SENAI (Campus Paulo Antônio Skaf) - Curso de Ciência de Dados<br>
+                💡 Especialista em educação inclusiva e psicopedagogia aplicada à tecnologia
+            </p>
+        </div>
+        """
+        st.markdown(jessica_html, unsafe_allow_html=True)
+    except (FileNotFoundError, UnidentifiedImageError):
+        st.warning("Não foi possível carregar a imagem da orientadora Jéssica. Verifique se o arquivo '../jessica.franzon.jpg.jpeg' existe e é uma imagem JPEG válida.")
     
     # Referências Principais
     st.markdown("## 📚 Referências Principais 📚")
