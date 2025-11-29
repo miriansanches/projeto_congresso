@@ -82,14 +82,14 @@ def load_and_prepare_impact_data():
     # O usuário deve colocar o arquivo 'Impact_AI_v2.csv' na pasta 'upload'
     
     try:
-        df = pd.read_csv('/Users/miriansanchesfiorini/Desktop/projeto_congresso/The impact of artificial intelligence on society.csv', encoding='utf-8')
+        df = pd.read_csv('The impact of artificial intelligence on society.csv', encoding='utf-8')
     except FileNotFoundError:
         st.error("Arquivo 'Impact_AI_v2.csv' não encontrado. Por favor, certifique-se de que ele está na pasta 'upload'.")
         return None
     except Exception as e:
         
         try:
-            df = pd.read_csv('/Users/miriansanchesfiorini/Desktop/projeto_congresso/The impact of artificial intelligence on society.csv', encoding='latin-1')
+            df = pd.read_csv('The impact of artificial intelligence on society.csv', encoding='latin-1')
         except Exception as e_latin:
             st.error(f"Erro ao carregar 'Impact_AI_v2.csv' com latin-1: {e_latin}. Não foi possível carregar os dados.")
             return None
