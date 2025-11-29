@@ -19,14 +19,14 @@ def load_and_prepare_survey_data():
     
     # Tentativa de carregar o arquivo real se ele existir
     try:
-        df = pd.read_csv('/Users/miriansanchesfiorini/Desktop/projeto_congresso/Survey_AI.csv', encoding='utf-8')
+        df = pd.read_csv('https://github.com/miriansanches/projeto_congresso/blob/main/Survey_AI.csv', encoding='utf-8')
     except FileNotFoundError:
         st.error("Arquivo 'Survey_AI.csv' não encontrado. Por favor, certifique-se de que ele está na pasta 'upload'.")
         return None
     except Exception as e:
         st.warning(f"Erro ao carregar 'Survey_AI.csv' com utf-8: {e}. Tentando 'latin-1'.")
         try:
-            df = pd.read_csv('upload/Survey_AI.csv', encoding='latin-1')
+            df = pd.read_csv('https://github.com/miriansanches/projeto_congresso/blob/main/Survey_AI.csv', encoding='latin-1')
         except Exception as e_latin:
             st.error(f"Erro ao carregar 'Survey_AI.csv' com latin-1: {e_latin}. Não foi possível carregar os dados.")
             return None
