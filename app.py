@@ -5,92 +5,175 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
-import pymysql
-from contextlib import contextmanager # Importar contextmanager para a função de conexão
+import json
+from io import StringIO
+from pathlib import Path
 
-# ==================== FUNÇÕES DE CONEXÃO E GRÁFICOS (CONSOLIDADAS) ====================
 
-# --- Configurações do Banco de Dados ---
-# ATENÇÃO: O usuário deve preencher estas variáveis com as credenciais do seu banco de dados MySQL local.
-# ESTE É O ÚNICO PONTO QUE VOCÊ PRECISA EDITAR PARA CONECTAR SEU BANCO DE DADOS.
-DB_CONFIG = {
-    "host": "localhost",  # Ou o IP do seu servidor MySQL, se for remoto
-    "user": "seu_usuario_mysql",
-    "password": "sua_senha_mysql",
-    "database": "seu_banco_de_dados",
-    "cursorclass": pymysql.cursors.DictCursor
-}
-
-@contextmanager
-def get_db_connection():
-    """
-    Cria e gerencia a conexão com o banco de dados MySQL.
-    Usa o decorador @contextmanager para garantir que a conexão seja fechada.
-    """
-    conn = None
+# Função para carregar e preparar os dados do Survey_AI.csv
+@st.cache_data
+def load_and_prepare_survey_data():
+    # O arquivo Survey_AI.csv não foi fornecido diretamente, mas o código do notebook
+    # sugere que ele está em 'upload/Survey_AI.csv'.
+    # O usuário deve colocar o arquivo 'Survey_AI.csv' na pasta 'upload'
+    
+    # Tentativa de carregar o arquivo real se ele existir
     try:
-        # Tenta criar a conexão
-        conn = pymysql.connect(**DB_CONFIG)
-        yield conn
-    except pymysql.err.OperationalError as e:
-        # Exibe um erro amigável no Streamlit se a conexão falhar
-        st.error(f"Erro de Conexão com o Banco de Dados: Verifique se o MySQL está rodando e se as credenciais em DB_CONFIG estão corretas. Detalhes: {e}")
-        # Retorna None para indicar falha na conexão
-        yield None
-    finally:
-        # Garante que a conexão seja fechada, mesmo em caso de erro
-        if conn:
-            conn.close()
+        df = pd.read_csv('/Users/miriansanchesfiorini/Desktop/projeto_congresso/Survey_AI.csv', encoding='utf-8')
+    except FileNotFoundError:
+        st.error("Arquivo 'Survey_AI.csv' não encontrado. Por favor, certifique-se de que ele está na pasta 'upload'.")
+        return None
+    except Exception as e:
+        st.warning(f"Erro ao carregar 'Survey_AI.csv' com utf-8: {e}. Tentando 'latin-1'.")
+        try:
+            df = pd.read_csv('upload/Survey_AI.csv', encoding='latin-1')
+        except Exception as e_latin:
+            st.error(f"Erro ao carregar 'Survey_AI.csv' com latin-1: {e_latin}. Não foi possível carregar os dados.")
+            return None
 
-@st.cache_data(ttl=3600) # Cacheia os dados por 1 hora
-def get_data_from_db(query):
-    """
-    Executa uma query SQL e retorna os resultados como um DataFrame do Pandas.
-    """
-    with get_db_connection() as conn:
-        if conn is None:
-            return pd.DataFrame() # Retorna DataFrame vazio em caso de falha na conexão
+    # Renomear e mapear colunas (baseado em graficos_output_survey_ai.ipynb)
+    column_mapping = {
+        'Q1.AI_knowledge': 'Conhecimento_IA',
+        'Q3#2.Job_replacement': 'Substituicao_Emprego',
+        'Q3#3.Problem_solving': 'Resolucao_Problemas',
+        'Q3#4.AI_rulling_society': 'IA_Governa_Sociedade',
+        'Q4#3.Economic_growth': 'Crescimento_Economico',
+        'Q4#4.Job_loss': 'Perda_Emprego',
+        'Q5.Feelings': 'Sentimentos_IA',
+        'Q12.Gender': 'Genero',
+        'Q13.Year_of_study': 'Ano_Estudo',
+        'Q14.Major': 'Curso'
+    }
+    
+    # Aplicar o mapeamento apenas se as colunas existirem
+    cols_to_rename = {k: v for k, v in column_mapping.items() if k in df.columns}
+    df.rename(columns=cols_to_rename, inplace=True)
+
+    # Mapeamento de valores para melhor visualização
+    sentimentos_map = {1: 'Otimista', 2: 'Ansioso', 3: 'Indiferente', 4: 'Cético'}
+    if 'Sentimentos_IA' in df.columns:
+        df['Sentimentos_IA_Desc'] = df['Sentimentos_IA'].map(sentimentos_map)
+
+    genero_map = {1: 'Masculino', 2: 'Feminino'}
+    if 'Genero' in df.columns:
+        df['Genero_Desc'] = df['Genero'].map(genero_map)
+
+    likert_map = {
+        1: 'Discordo Fortemente', 2: 'Discordo', 3: 'Neutro', 4: 'Concordo', 5: 'Concordo Fortemente'
+    }
+    
+    for col_orig, col_desc in [
+        ('Substituicao_Emprego', 'Substituicao_Emprego_Desc'),
+        ('Resolucao_Problemas', 'Resolucao_Problemas_Desc'),
+        ('IA_Governa_Sociedade', 'IA_Governa_Sociedade_Desc'),
+        ('Crescimento_Economico', 'Crescimento_Economico_Desc'),
+        ('Perda_Emprego', 'Perda_Emprego_Desc')
+    ]:
+        if col_orig in df.columns:
+            df[col_desc] = df[col_orig].map(likert_map)
+
+    return df
+
+# Função para carregar e preparar os dados do Impact_AI_v2.csv
+@st.cache_data
+def load_and_prepare_impact_data():
+    # O arquivo Impact_AI_v2.csv não foi fornecido diretamente, mas o código do notebook
+    # sugere que ele está em 'upload/Impact_AI_v2.csv'.
+    # O usuário deve colocar o arquivo 'Impact_AI_v2.csv' na pasta 'upload'
+    
+    try:
+        df = pd.read_csv('/Users/miriansanchesfiorini/Desktop/projeto_congresso/The impact of artificial intelligence on society.csv', encoding='utf-8')
+    except FileNotFoundError:
+        st.error("Arquivo 'Impact_AI_v2.csv' não encontrado. Por favor, certifique-se de que ele está na pasta 'upload'.")
+        return None
+    except Exception as e:
         
         try:
-            # st.cache_data não funciona bem com conexões, por isso a conexão é feita dentro da função
-            df = pd.read_sql(query, conn)
-            return df
-        except Exception as e:
-            st.error(f"Erro ao executar a query SQL. Verifique a sintaxe da query e o nome da tabela. Detalhes: {e}")
-            return pd.DataFrame()
+            df = pd.read_csv('/Users/miriansanchesfiorini/Desktop/projeto_congresso/The impact of artificial intelligence on society.csv', encoding='latin-1')
+        except Exception as e_latin:
+            st.error(f"Erro ao carregar 'Impact_AI_v2.csv' com latin-1: {e_latin}. Não foi possível carregar os dados.")
+            return None
 
-# --- Funções de Geração de Gráficos Genéricos ---
-
-def create_positive_impact_chart(df):
-    """
-    Cria um gráfico de barras para mostrar o impacto positivo da IA (comparação Antes vs Depois).
-    Assume que o DataFrame tem as colunas: 'setor', 'valor_antes', 'valor_depois'.
-    """
-    if df.empty:
-        st.warning("Dados não disponíveis para o gráfico de Impacto Positivo. Verifique a conexão com o banco de dados e a query SQL.")
-        return
-
-    # Derrete o DataFrame para o formato longo, ideal para o Plotly
-    df_melted = df.melt(id_vars='setor', value_vars=['valor_antes', 'valor_depois'],
-                        var_name='Status', value_name='Valor da Métrica')
+    # Renomear e mapear colunas (baseado em graficos_output_impact_ai_v2.ipynb)
+    column_mapping = {
+        'How much knowledge do you have about artificial intelligence (AI) technologies?': 'Conhecimento_IA',
+        'Do you generally trust artificial intelligence (AI)?': 'Confiança_IA',
+        'Do you think artificial intelligence (AI) will be generally beneficial or harmful to humanity?': 'Impacto_Humanidade',
+        'I think artificial intelligence (AI) could threaten individual freedoms.': 'Ameaça_Liberdades',
+        'Could artificial intelligence (AI) completely eliminate some professions?': 'Elimina_Profissões',
+        'Do you think your own job could be affected by artificial intelligence (AI)?': 'Afeta_Emprego_Pessoal',
+        'Do you believe that artificial intelligence (AI) should be limited by ethical rules?': 'Limites_Éticos',
+        'Could artificial intelligence (AI) one day become conscious like humans?': 'IA_Consciente'
+    }
     
-    # Mapeia os nomes das colunas para melhor visualização
-    df_melted['Status'] = df_melted['Status'].map({'valor_antes': 'Antes da IA', 'valor_depois': 'Com IA'})
+    cols_to_rename = {k: v for k, v in column_mapping.items() if k in df.columns}
+    df.rename(columns=cols_to_rename, inplace=True)
 
+    # Mapeamento de valores para melhor visualização
+    confianca_map = {
+        "I trust it": "Confio",
+        "I don't trust it": "Não Confio",
+        "I'm undecided": "Indeciso"
+    }
+    if 'Confiança_IA' in df.columns:
+        df['Confiança_IA_Desc'] = df['Confiança_IA'].map(confianca_map)
+
+    impacto_map = {
+        "More beneficial than harmful": "Mais Benéfica",
+        "More harmful than beneficial": "Mais Prejudicial",
+        "Both beneficial and harmful": "Ambos",
+        "I have no idea": "Não Sei"
+    }
+    if 'Impacto_Humanidade' in df.columns:
+        df['Impacto_Humanidade_Desc'] = df['Impacto_Humanidade'].map(impacto_map)
+
+    # Mapeamento para as colunas de concordância/discordância
+    agree_map = {
+        "Strongly Agree": "Concordo Fortemente",
+        "Agree": "Concordo",
+        
+        
+        
+    }
+    
+    for col_orig, col_desc in [
+        ('Ameaça_Liberdades', 'Ameaça_Liberdades_Desc'),
+        ('Limites_Éticos', 'Limites_Éticos_Desc')
+    ]:
+        if col_orig in df.columns:
+            df[col_desc] = df[col_orig].map(agree_map)
+
+    return df
+
+# ==============================================================================
+# GRÁFICOS DO SURVEY_AI (Notebook 1)
+# ==============================================================================
+
+def plot_conhecimento_ia(df):
+    if df is None or 'Conhecimento_IA' not in df.columns:
+        st.warning("Dados para 'Conhecimento_IA' não disponíveis.")
+        return
+    
+    st.markdown("### 1. Distribuição do Nível de Conhecimento sobre IA (Q1)")
+    
+    # Contagem de frequência
+    conhecimento_counts = df['Conhecimento_IA'].value_counts().sort_index()
+    
+    # Criar o gráfico de barras com Plotly
     fig = px.bar(
-        df_melted,
-        x='setor',
-        y='Valor da Métrica',
-        color='Status',
-        barmode='group',
-        title='📈 Impacto Positivo da IA por Setor (Antes vs Com IA)',
-        labels={'setor': 'Setor', 'Valor da Métrica': 'Valor da Métrica (%)'},
-        color_discrete_map={'Antes da IA': '#ff6b6b', 'Com IA': '#0099ff'}
+        conhecimento_counts,
+        x=conhecimento_counts.index,
+        y=conhecimento_counts.values,
+        labels={'x': 'Nível de Conhecimento (Escala 1-10)', 'y': 'Contagem de Respondentes'},
+        title='Distribuição do Nível de Conhecimento sobre IA',
+        color=conhecimento_counts.values,
+        color_continuous_scale=px.colors.sequential.Viridis
     )
     
-    # Aplica o tema escuro para combinar com o CSS do Streamlit
     fig.update_layout(
         template='plotly_dark',
+        xaxis={'tickmode': 'linear'},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
         plot_bgcolor='rgba(0, 0, 0, 0.1)',
         paper_bgcolor='rgba(0, 4, 40, 0.3)',
         font=dict(color='white', size=12)
@@ -98,30 +181,28 @@ def create_positive_impact_chart(df):
     
     st.plotly_chart(fig, use_container_width=True)
 
-def create_efficiency_pie_chart(df):
-    """
-    Cria um gráfico de pizza para mostrar a distribuição de ganhos de eficiência.
-    Assume que o DataFrame tem as colunas: 'setor', 'valor_antes', 'valor_depois'.
-    """
-    if df.empty:
-        st.warning("Dados não disponíveis para o gráfico de Eficiência. Verifique a conexão com o banco de dados e a query SQL.")
+def plot_sentimentos_ia(df):
+    if df is None or 'Sentimentos_IA_Desc' not in df.columns:
+        st.warning("Dados para 'Sentimentos_IA' não disponíveis.")
         return
-
-    # Calcula o ganho de eficiência (valor_depois - valor_antes)
-    df['ganho_eficiencia'] = df['valor_depois'] - df['valor_antes']
     
+    st.markdown("### 2. Sentimentos em Relação à IA (Q5)")
+    
+    # Contagem de frequência
+    sentimentos_counts = df['Sentimentos_IA_Desc'].value_counts()
+    
+    # Criar o gráfico de pizza com Plotly
     fig = px.pie(
-        df,
-        names='setor',
-        values='ganho_eficiencia',
-        title='📊 Distribuição do Ganho de Eficiência com IA por Setor',
-        hole=.3,
-        color_discrete_sequence=px.colors.sequential.Agsunset
+        sentimentos_counts,
+        names=sentimentos_counts.index,
+        values=sentimentos_counts.values,
+        title='Sentimentos Predominantes em Relação à IA',
+        hole=0.3,
+        color_discrete_sequence=px.colors.sequential.RdBu
     )
     
-    fig.update_traces(textposition='inside', textinfo='percent+label')
+    fig.update_traces(textinfo='percent+label', pull=[0.1, 0, 0, 0])
     
-    # Aplica o tema escuro para combinar com o CSS do Streamlit
     fig.update_layout(
         template='plotly_dark',
         plot_bgcolor='rgba(0, 0, 0, 0.1)',
@@ -130,6 +211,551 @@ def create_efficiency_pie_chart(df):
     )
     
     st.plotly_chart(fig, use_container_width=True)
+
+def plot_likert_scale(df, column, title):
+    if df is None or column not in df.columns:
+        st.warning(f"Dados para '{title}' não disponíveis.")
+        return
+    
+    st.markdown(f"### {title}")
+    
+    # Definir a ordem correta para a escala Likert
+    order = ['Discordo Fortemente', 'Discordo', 'Neutro', 'Concordo', 'Concordo Fortemente']
+    
+    # Contagem de frequência
+    counts = df[column].value_counts().reindex(order).fillna(0)
+    
+    # Criar o gráfico de barras com Plotly
+    fig = px.bar(
+        counts,
+        x=counts.index,
+        y=counts.values,
+        labels={'x': 'Nível de Concordância', 'y': 'Contagem de Respondentes'},
+        title=title,
+        color=counts.values,
+        color_continuous_scale=px.colors.sequential.Plasma
+    )
+    
+    fig.update_layout(
+        template='plotly_dark',
+        xaxis={'categoryorder': 'array', 'categoryarray': order},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_conhecimento_vs_sentimento(df):
+    if df is None or 'Conhecimento_IA' not in df.columns or 'Sentimentos_IA_Desc' not in df.columns:
+        st.warning("Dados para 'Conhecimento_IA' ou 'Sentimentos_IA' não disponíveis.")
+        return
+    
+    st.markdown("### 5. Distribuição de Conhecimento por Sentimento")
+    
+    # Contar quantas pessoas estão em cada nível de conhecimento por sentimento
+    df_count = df.groupby(['Sentimentos_IA_Desc', 'Conhecimento_IA']).size().reset_index(name='Quantidade')
+    
+    # Criar gráfico de linha
+    fig = px.line(
+        df_count,
+        x='Conhecimento_IA',
+        y='Quantidade',
+        color='Sentimentos_IA_Desc',
+        markers=True,  # Adiciona pontos nas linhas
+        title='Quantidade de Respondentes por Nível de Conhecimento e Sentimento',
+        labels={'Conhecimento_IA': 'Nível de Conhecimento (1-10)', 'Quantidade': 'Número de Pessoas', 'Sentimentos_IA_Desc': 'Sentimento'},
+        color_discrete_sequence=px.colors.qualitative.Set1
+    )
+    
+    fig.update_traces(mode='lines+markers', hovertemplate='<b>%{fullData.name}</b><br>Conhecimento: %{x}<br>Pessoas: %{y}<extra></extra>')
+    
+    fig.update_layout(
+        template='plotly_dark',
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12),
+        hovermode='x unified'
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    def plot_confianca_vs_conhecimento(df):
+        """
+        Gráfico que mostra a distribuição de Confiança em relação à IA
+        agrupada por Nível de Conhecimento
+        """
+    if df is None or 'Confiança_IA_Desc' not in df.columns or 'Conhecimento_IA' not in df.columns:
+        st.warning("Dados para 'Confiança_IA' ou 'Conhecimento_IA' não disponíveis.")
+        return
+    
+    st.markdown("### 10. Distribuição de Confiança na IA por Nível de Conhecimento")
+    
+    # Criar mapeamento de nível de conhecimento em categorias
+    def categorizar_conhecimento(valor):
+        if valor <= 2:
+            return 'Sem Conhecimento'
+        elif valor <= 4:
+            return 'Pouco Conhecimento'
+        elif valor <= 6:
+            return 'Conhecimento Básico'
+        elif valor <= 8:
+            return 'Bom Conhecimento'
+        else:
+            return 'Conhecimento Especialista'
+    
+    df['Conhecimento_Cat'] = df['Conhecimento_IA'].apply(categorizar_conhecimento)
+    
+    # Criar tabela de frequência cruzada
+    crosstab = pd.crosstab(
+        df['Conhecimento_Cat'],
+        df['Confiança_IA_Desc'],
+        normalize='index'
+    ) * 100
+    
+    # Reordenar as colunas de confiança
+    ordem_confianca = ['Não Confio', 'Indeciso', 'Confio']
+    crosstab = crosstab[[col for col in ordem_confianca if col in crosstab.columns]]
+    
+    # Reordenar as linhas
+    ordem_conhecimento = ['Sem Conhecimento', 'Pouco Conhecimento', 'Conhecimento Básico', 
+                          'Bom Conhecimento', 'Conhecimento Especialista']
+    crosstab = crosstab.reindex([cat for cat in ordem_conhecimento if cat in crosstab.index])
+    
+    # Cores semânticas
+    color_map = {
+        'Não Confio': '#d62728',   # Vermelho
+        'Indeciso': '#ffdd57',     # Amarelo
+        'Confio': '#7b3ff2'        # Roxo/Azul
+    }
+    
+    # Criar gráfico de barras empilhadas
+    fig = go.Figure()
+    
+    for confianca in ordem_confianca:
+        if confianca in crosstab.columns:
+            fig.add_trace(go.Bar(
+                x=crosstab.index,
+                y=crosstab[confianca],
+                name=confianca,
+                marker_color=color_map.get(confianca, '#gray'),
+                text=crosstab[confianca].round(1),
+                textposition='inside',
+                hovertemplate=f'<b>{confianca}</b><br>Percentagem: %{{y:.1f}}%<extra></extra>'
+            ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title='Distribuição de Confiança na IA por Nível de Conhecimento',
+        xaxis_title='Nível de Conhecimento sobre IA',
+        yaxis_title='Percentagem (%)',
+        template='plotly_dark',
+        xaxis={'tickangle': -45},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12),
+        hovermode='x unified',
+        height=500
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+def plot_distribuicao_faixa_etaria(df):
+    """
+    Gráfico de Pizza: Distribuição por Faixa Etária
+    Adaptado para o seu dashboard
+    """
+    if df is None or 'What is your age range?' not in df.columns:
+        st.warning("Dados para 'Faixa Etária' não disponíveis.")
+        return
+    
+    st.markdown("### 11. Distribuição dos Respondentes por Faixa Etária")
+    
+    # Contagem de frequência
+    age_counts = df['What is your age range?'].value_counts()
+    
+    # Criar gráfico de pizza
+    fig = px.pie(
+        names=age_counts.index,
+        values=age_counts.values,
+        title='📊 Distribuição por Faixa Etária',
+        hole=0.4,  # Gráfico de Rosca
+        color_discrete_sequence=px.colors.qualitative.Set3
+    )
+    
+    fig.update_traces(
+        textinfo='percent+label',
+        pull=[0.05] * len(age_counts),  # Leve separação dos segmentos
+        hovertemplate='<b>%{label}</b><br>Respondentes: %{value}<br>Percentagem: %{percent}<extra></extra>'
+    )
+    
+    fig.update_layout(
+        template='plotly_dark',
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12),
+        height=500
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+
+
+
+# ==============================================================================
+# GRÁFICOS DO IMPACT_AI_V2 (Notebook 2)
+# ==============================================================================
+
+def plot_confianca_ia(df):
+    if df is None or 'Confiança_IA_Desc' not in df.columns:
+        st.warning("Dados para 'Confiança_IA' não disponíveis.")
+        return
+    
+    st.markdown("### 6. Confiança Geral na Inteligência Artificial")
+    
+    # Contagem de frequência
+    confianca_counts = df['Confiança_IA_Desc'].value_counts()
+    
+    # Criar o gráfico de barras com Plotly
+    fig = px.bar(
+        confianca_counts,
+        x=confianca_counts.index,
+        y=confianca_counts.values,
+        labels={'x': 'Nível de Confiança', 'y': 'Contagem de Respondentes'},
+        title='Confiança Geral na Inteligência Artificial',
+        color=confianca_counts.values,
+        color_continuous_scale=px.colors.sequential.Sunset
+    )
+    
+    fig.update_layout(
+        template='plotly_dark',
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_impacto_humanidade(df):
+    if df is None or 'Impacto_Humanidade_Desc' not in df.columns:
+        st.warning("Dados para 'Impacto_Humanidade' não disponíveis.")
+        return
+    
+    st.markdown("### 7. Percepção do Impacto da IA na Humanidade")
+    
+    # Contagem de frequência
+    impacto_counts = df['Impacto_Humanidade_Desc'].value_counts().reset_index()
+    impacto_counts.columns = ['Impacto', 'Quantidade']
+    
+    # Calcular percentual
+    impacto_counts['Percentual'] = (impacto_counts['Quantidade'] / impacto_counts['Quantidade'].sum() * 100).round(1)
+    
+    # Ordenar para visualização (maior para menor)
+    impacto_counts = impacto_counts.sort_values('Quantidade', ascending=True)
+    
+    # Criar texto customizado para mostrar quantidade e percentual
+    impacto_counts['Label'] = impacto_counts.apply(
+        lambda row: f"{row['Quantidade']} respondentes ({row['Percentual']}%)", 
+        axis=1
+    )
+    
+    # Criar gráfico de barras horizontal
+    fig = px.bar(
+        impacto_counts,
+        y='Impacto',
+        x='Quantidade',
+        orientation='h',
+        color='Quantidade',
+        color_continuous_scale='Plasma',
+        title='O que os respondentes acham sobre o Impacto da IA na Humanidade?',
+        labels={'Quantidade': 'Número de Respondentes', 'Impacto': 'Percepção'},
+        text='Label'  # Mostra rótulo customizado
+    )
+    
+    fig.update_traces(textposition='outside', hovertemplate='<b>%{y}</b><br>Respondentes: %{x}<extra></extra>')
+    
+    fig.update_layout(
+        template='plotly_dark',
+        xaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12),
+        showlegend=False,
+        height=400
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_ameaca_liberdades(df):
+    if df is None or 'Ameaça_Liberdades_Desc' not in df.columns:
+        st.warning("Dados para 'Ameaça_Liberdades' não disponíveis.")
+        return
+    
+    st.markdown("### 9. Ameaça às Liberdades Individuais pela IA")
+    
+    # Definir a ordem correta para a escala Likert
+    order = ['Discordo Fortemente', 'Discordo', 'Indeciso', 'Concordo', 'Concordo Fortemente']
+    
+    # Contagem de frequência
+    counts = df['Ameaça_Liberdades_Desc'].value_counts().reindex(order).fillna(0).reset_index()
+    counts.columns = ['Resposta', 'Quantidade']
+    
+    # Calcular percentual
+    total = counts['Quantidade'].sum()
+    counts['Percentual'] = (counts['Quantidade'] / total * 100).round(1)
+    counts['Label'] = counts.apply(lambda x: f"{x['Quantidade']} ({x['Percentual']}%)", axis=1)
+    
+    # Cores Semânticas (Traffic Light)
+    color_map = {
+        'Concordo': '#ff7f0e',             # Laranja
+        'Concordo Fortemente': '#d62728'   # Vermelho (é ameaça)
+    }
+    
+    fig = px.bar(
+        counts,
+        y='Resposta',
+        x='Quantidade',
+        orientation='h',
+        color='Resposta',
+        color_discrete_map=color_map,
+        text='Label',
+        title='A IA ameaça as liberdades individuais?',
+        labels={'Quantidade': 'Número de Respondentes', 'Resposta': 'Opinião'}
+    )
+    
+    fig.update_traces(textposition='outside', hovertemplate='<b>%{y}</b><br>Respondentes: %{x}<extra></extra>')
+    
+    fig.update_layout(
+        template='plotly_dark',
+        xaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12),
+        showlegend=False,
+        height=400
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_distribuicao_faixa_etaria(df):
+    if df is None or 'What is your age range?' not in df.columns:
+        st.warning("Dados para 'Faixa Etária' não disponíveis.")
+        return
+    
+    st.markdown("### 11. Distribuição dos Respondentes por Faixa Etária")
+    
+    # Contagem de frequência
+    age_counts = df['What is your age range?'].value_counts()
+    
+    # Criar gráfico de pizza
+    fig = px.pie(
+        names=age_counts.index,
+        values=age_counts.values,
+        title='📊 Distribuição por Faixa Etária',
+        hole=0.4,  # Gráfico de Rosca
+        color_discrete_sequence=px.colors.qualitative.Set3
+    )
+    
+    fig.update_traces(
+        textinfo='percent+label',
+        pull=[0.05] * len(age_counts),  # Leve separação dos segmentos
+        hovertemplate='<b>%{label}</b><br>Respondentes: %{value}<br>Percentagem: %{percent}<extra></extra>'
+    )
+    
+    fig.update_layout(
+        template='plotly_dark',
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12),
+        height=500
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+def plot_confianca_vs_conhecimento(df):
+    if df is None or 'Confiança_IA_Desc' not in df.columns or 'Conhecimento_IA' not in df.columns:
+        st.warning("Dados para 'Confiança_IA' ou 'Conhecimento_IA' não disponíveis.")
+        return
+    
+    st.markdown("### 10. Distribuição de Confiança na IA por Nível de Conhecimento")
+    
+    # Criar mapeamento de nível de conhecimento em categorias
+    def categorizar_conhecimento(valor):
+        if valor <= 2:
+            return 'Sem Conhecimento'
+        elif valor <= 4:
+            return 'Pouco Conhecimento'
+        elif valor <= 6:
+            return 'Conhecimento Básico'
+        elif valor <= 8:
+            return 'Bom Conhecimento'
+        else:
+            return 'Conhecimento Especialista'
+    
+    df['Conhecimento_Cat'] = df['Conhecimento_IA'].apply(categorizar_conhecimento)
+    
+    # Criar tabela de frequência cruzada
+    crosstab = pd.crosstab(
+        df['Conhecimento_Cat'],
+        df['Confiança_IA_Desc'],
+        normalize='index'
+    ) * 100
+    
+    # Reordenar as colunas de confiança
+    ordem_confianca = ['Não Confio', 'Indeciso', 'Confio']
+    crosstab = crosstab[[col for col in ordem_confianca if col in crosstab.columns]]
+    
+    # Reordenar as linhas
+    ordem_conhecimento = ['Sem Conhecimento', 'Pouco Conhecimento', 'Conhecimento Básico', 
+                          'Bom Conhecimento', 'Conhecimento Especialista']
+    crosstab = crosstab.reindex([cat for cat in ordem_conhecimento if cat in crosstab.index])
+    
+    # Cores semânticas
+    color_map = {
+        'Não Confio': '#d62728',   # Vermelho
+        'Indeciso': '#ffdd57',     # Amarelo
+        'Confio': '#7b3ff2'        # Roxo/Azul
+    }
+    
+    # Criar gráfico de barras empilhadas
+    fig = go.Figure()
+    
+    for confianca in ordem_confianca:
+        if confianca in crosstab.columns:
+            fig.add_trace(go.Bar(
+                x=crosstab.index,
+                y=crosstab[confianca],
+                name=confianca,
+                marker_color=color_map.get(confianca, '#gray'),
+                text=crosstab[confianca].round(1),
+                textposition='inside',
+                hovertemplate=f'<b>{confianca}</b><br>Percentagem: %{{y:.1f}}%<extra></extra>'
+            ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title='Distribuição de Confiança na IA por Nível de Conhecimento',
+        xaxis_title='Nível de Conhecimento sobre IA',
+        yaxis_title='Percentagem (%)',
+        template='plotly_dark',
+        xaxis={'tickangle': -45},
+        yaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12),
+        hovermode='x unified',
+        height=500
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+
+
+
+
+def plot_limites_eticos(df):
+    if df is None or 'Limites_Éticos_Desc' not in df.columns:
+        st.warning("Dados para 'Limites_Éticos' não disponíveis.")
+        return
+    
+    st.markdown("### 8. Consenso sobre Limites Éticos para a IA")
+    
+    # Ordem lógica
+    order = ['Indeciso', 'Concordo', 'Concordo Fortemente']
+    
+    # Contagem
+    counts = df['Limites_Éticos_Desc'].value_counts().reindex(order).fillna(0).reset_index()
+    counts.columns = ['Resposta', 'Quantidade']
+    
+    # Calcular percentual para o rótulo
+    total = counts['Quantidade'].sum()
+    counts['Percentual'] = (counts['Quantidade'] / total * 100).round(1)
+    counts['Label'] = counts.apply(lambda x: f"{x['Quantidade']} ({x['Percentual']}%)", axis=1)
+    
+    # Cores Semânticas (Traffic Light)
+    color_map = {
+        'Indeciso': '#7f7f7f',            # Cinza
+        'Concordo': '#2ca02c',            # Verde
+        'Concordo Fortemente': '#1f77b4'  # Azul ou Verde Escuro (#006400)
+    }
+
+    # Ajustando para Verde Escuro no Concordo Fortemente para ficar mais intuitivo
+    color_map['Concordo Fortemente'] = '#006400' 
+    
+    fig = px.bar(
+        counts,
+        y='Resposta',
+        x='Quantidade',
+        orientation='h', # Horizontal facilita a leitura dos rótulos longos
+        color='Resposta',
+        color_discrete_map=color_map,
+        text='Label',
+        title='A IA deve ser limitada por regras éticas?',
+        labels={'Quantidade': 'Número de Respondentes', 'Resposta': 'Opinião'}
+    )
+    
+    fig.update_layout(
+        template='plotly_dark',
+        xaxis={'gridcolor': 'rgba(255,255,255,0.1)'},
+        plot_bgcolor='rgba(0, 0, 0, 0.1)',
+        paper_bgcolor='rgba(0, 4, 40, 0.3)',
+        font=dict(color='white', size=12),
+        showlegend=False,
+        height=400
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# ==============================================================================
+# FUNÇÃO PRINCIPAL PARA A PÁGINA DE GRÁFICOS
+# ==============================================================================
+
+def show_graficos_page():
+    st.markdown("# 📊 Análise de Dados e Gráficos")
+    
+    st.markdown("""
+    <div class="content-box">
+        <h2> Análise da Percepção e Impacto da IA </h2>
+        <p>
+            Esta seção apresenta os resultados da pesquisa sobre a percepção da Inteligência Artificial, 
+            dividida em duas análises principais: uma focada no **Survey Acadêmico** e outra no **Impacto Geral da IA**.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Carregar dados
+    df_survey = load_and_prepare_survey_data()
+    df_impact = load_and_prepare_impact_data()
+    
+    tab_survey, tab_impact = st.tabs(["Pesquisa Acadêmica (Survey_AI)", "Impacto Geral (Impact_AI_v2)"])
+    
+    with tab_survey:
+        st.markdown("## Resultados da Pesquisa Acadêmica (Survey_AI)")
+        if df_survey is not None:
+            plot_conhecimento_ia(df_survey)
+            plot_sentimentos_ia(df_survey)
+            plot_likert_scale(df_survey, 'Substituicao_Emprego_Desc', '3. Percepção sobre Substituição de Empregos pela IA')
+            plot_likert_scale(df_survey, 'Crescimento_Economico_Desc', '4. Percepção sobre Crescimento Econômico pela IA')
+            plot_conhecimento_vs_sentimento(df_survey)
+        else:
+            st.error("Não foi possível carregar os dados da Pesquisa Acadêmica. Verifique o arquivo 'Survey_AI.csv'.")
+
+    with tab_impact:
+        st.markdown("## Resultados da Pesquisa de Impacto Geral (Impact_AI_v2)")
+    if df_impact is not None:
+        plot_confianca_ia(df_impact)
+        plot_impacto_humanidade(df_impact)
+        plot_ameaca_liberdades(df_impact)
+        plot_limites_eticos(df_impact)
+        plot_confianca_vs_conhecimento(df_impact)  # ← NOVO
+        plot_distribuicao_faixa_etaria(df_impact)  # ← NOVO
+    else:
+        st.error("Não foi possível carregar os dados...")
+
+
+
 
 # ==================== CONFIGURAÇÃO DA PÁGINA ====================
 st.set_page_config(
@@ -316,36 +942,37 @@ st.markdown("""
         font-weight: 600;
         font-size: 1.1rem;
         padding: 0.8rem 2rem;
-        border-radius: 15px;
+        border-radius: 25px;
         border: none;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        box-shadow: 0 5px 20px rgba(0,0,0,0.3);
         transition: all 0.3s ease;
     }
     
     .stButton > button:hover {
-        background: linear-gradient(90deg, #004e92 0%, #0099ff 100%);
-        box-shadow: 0 6px 20px rgba(0,153,255,0.4);
-        transform: translateY(-2px);
+        transform: translateY(-3px);
+        box-shadow: 0 8px 30px rgba(0,153,255,0.4);
     }
     
     /* Animações */
-    @keyframes fadeInDown {
-        0% {
+    @keyframes fadeIn {
+        from {
             opacity: 0;
-            transform: translateY(-20px);
+            transform: translateY(20px);
         }
-        100% {
+        to {
             opacity: 1;
             transform: translateY(0);
         }
     }
     
-    @keyframes fadeIn {
-        0% {
+    @keyframes fadeInDown {
+        from {
             opacity: 0;
+            transform: translateY(-30px);
         }
-        100% {
+        to {
             opacity: 1;
+            transform: translateY(0);
         }
     }
     
@@ -441,7 +1068,7 @@ with st.sidebar:
     
     pagina = st.radio(
         "📋 Navegação",
-        ["🏠 Menu Inicial", " 🟢 Pontos Positivos", " 🔴 Pontos Negativos", " 📈 Análise de Dados", "ℹ️ Sobre"],
+        ["🏠 Menu Inicial", "📊 Gráficos", "ℹ️ Sobre"],
         label_visibility="collapsed"
     )
     
@@ -497,7 +1124,8 @@ if pagina == "🏠 Menu Inicial":
     <div class="content-box">
         <h2> Hipótese Central de nosso Estudo </h2>
         <p>
-            <strong>A dependência excessiva de ferramentas de Inteligência Artificial (IA) pode levar a uma deterioração das habilidades cognitivas críticas e criativas, criando condições que potencialmente levam a desafios futuros no desenvolvimento intelectual e na autonomia dos indivíduos.</strong> 
+            <strong>Embora a tecnologia facilite o acesso à informação e amplie horizontes, o uso excessivo pode adormecer habilidades 
+            críticas e criativas, criando condições que potencialmente levam a desafios futuros no desenvolvimento intelectual e na autonomia dos indivíduos.</strong> 
         </p>
         <p>
             A sociedade está usufruindo de grandes facilidades tecnológicas e, pode estar semeando, ainda que de forma inconsciente, 
@@ -537,7 +1165,7 @@ if pagina == "🏠 Menu Inicial":
     limitando o desenvolvimento de habilidades comunicativas e colaborativas. 
     """)
     
-    
+
     # Objetivos da Pesquisa
     st.markdown("""
     <div class="content-box">
@@ -552,292 +1180,47 @@ if pagina == "🏠 Menu Inicial":
     </div>
     """, unsafe_allow_html=True)
 
-# ==================== PÁGINA: ANÁLISE DE DADOS (Antigos Pontos Positivos) ====================
-elif pagina == " 📈 Análise de Dados":
-    st.markdown("#  Análise de Dados Interativa ")
+# ==================== PÁGINA: GRÁFICOS ====================
+elif pagina == "📊 Gráficos":
+    st.markdown("# 📊 Análise de Dados e Gráficos")
     
     st.markdown("""
     <div class="content-box">
-        <h2>📈 Visualizações de Dados 📈</h2>
+        <h2> Análise da Percepção e Impacto da IA </h2>
         <p>
-            Nesta seção, você pode explorar gráficos interativos que mostram a relação entre o uso de IA, 
-            consumo digital e impactos na cognição humana. 🧠📱
+            Esta seção apresenta os resultados da pesquisa sobre a percepção da Inteligência Artificial, 
+            dividida em duas análises principais: uma focada no **Survey Acadêmico** e outra no **Impacto Geral da IA**.
         </p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Abas para diferentes tipos de gráficos
-    tab1, tab2, tab3, tab4 = st.tabs(["📉 Uso de IA", "🧠 Cognição", "⏰ Tempo Digital", "📱 Padrões Online"])
+    # Carregar dados
+    df_survey = load_and_prepare_survey_data()
+    df_impact = load_and_prepare_impact_data()
     
-    with tab1:
-        st.markdown("### 📈 Crescimento do Uso de IA ao Longo do Tempo")
-        
-        # Dados simulados
-        anos = np.array([2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025])
-        adocao_ia = np.array([5, 8, 15, 25, 40, 60, 78, 85])
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=anos, y=adocao_ia,
-            mode='lines+markers',
-            name='Adoção de IA (%)',
-            line=dict(color='#0099ff', width=3),
-            marker=dict(size=10)
-        ))
-        
-        fig.update_layout(
-            title="📊 Crescimento da Adoção de IA Globalmente",
-            xaxis_title="Ano 📅",
-            yaxis_title="Percentual de Adoção (%)",
-            hovermode='x unified',
-            template='plotly_dark',
-            plot_bgcolor='rgba(0, 0, 0, 0.1)',
-            paper_bgcolor='rgba(0, 4, 40, 0.3)',
-            font=dict(color='white', size=12)
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
+    tab_survey, tab_impact = st.tabs(["Pesquisa Acadêmica (Survey_AI)", "Impacto Geral (Impact_AI_v2)"])
     
-    with tab2:
-        st.markdown("### 🧠 Impacto na Capacidade Cognitiva")
-        
-        # Dados simulados
-        categorias = ['Criatividade 🎨', 'Pensamento Crítico 🤔', 'Autonomia 🦸', 'Concentração 🎯', 'Memória 💾']
-        antes = [85, 80, 88, 90, 92]
-        depois = [65, 55, 62, 68, 70]
-        
-        fig = go.Figure(data=[
-            go.Bar(name='Antes do Uso Excessivo de IA 📈', x=categorias, y=antes, marker_color='#0099ff'),
-            go.Bar(name='Depois do Uso Excessivo de IA 📉', x=categorias, y=depois, marker_color='#ff6b6b')
-        ])
-        
-        fig.update_layout(
-            title="🧠 Comparação de Habilidades Cognitivas",
-            barmode='group',
-            hovermode='x unified',
-            template='plotly_dark',
-            plot_bgcolor='rgba(0, 0, 0, 0.1)',
-            paper_bgcolor='rgba(0, 4, 40, 0.3)',
-            font=dict(color='white', size=12),
-            yaxis_title="Nível de Capacidade (%)"
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with tab3:
-        st.markdown("### ⏰ Tempo Gasto em Plataformas Digitais")
-        
-        # Dados simulados
-        plataformas = ['Redes Sociais 📱', 'Buscadores 🔍', 'ChatGPT 🤖', 'Streaming 🎬', 'Email 📧']
-        tempo_horas = [4.2, 2.1, 1.8, 2.5, 1.4]
-        cores = ['#ff6b6b', '#0099ff', '#00d4ff', '#ffd700', '#00ff88']
-        
-        fig = go.Figure(data=[go.Pie(
-            labels=plataformas,
-            values=tempo_horas,
-            marker=dict(colors=cores),
-            textposition='inside',
-            textinfo='label+percent'
-        )])
-        
-        fig.update_layout(
-            title="⏰ Distribuição de Tempo em Plataformas Digitais (Média Diária)",
-            template='plotly_dark',
-            paper_bgcolor='rgba(0, 4, 40, 0.3)',
-            font=dict(color='white', size=12)
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with tab4:
-        st.markdown("### 📱 Padrões de Comportamento Online")
-        
-        # Dados simulados
-        dias = ['Seg 📅', 'Ter 📅', 'Qua 📅', 'Qui 📅', 'Sex 📅', 'Sab 📅', 'Dom 📅']
-        engajamento = [75, 78, 82, 80, 85, 88, 90]
-        produtividade = [70, 68, 65, 66, 60, 55, 50]
-        
-        fig = go.Figure()
-        
-        fig.add_trace(go.Scatter(
-            x=dias, y=engajamento,
-            mode='lines+markers',
-            name='Engajamento Digital 📱',
-            line=dict(color='#00d4ff', width=3),
-            marker=dict(size=10)
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=dias, y=produtividade,
-            mode='lines+markers',
-            name='Produtividade 💼',
-            line=dict(color='#ff6b6b', width=3),
-            marker=dict(size=10)
-        ))
-        
-        fig.update_layout(
-            title="📊 Relação Inversa: Engajamento Digital vs Produtividade",
-            xaxis_title="Dias da Semana",
-            yaxis_title="Índice (%)",
-            hovermode='x unified',
-            template='plotly_dark',
-            plot_bgcolor='rgba(0, 0, 0, 0.1)',
-            paper_bgcolor='rgba(0, 4, 40, 0.3)',
-            font=dict(color='white', size=12)
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Seção para inserir dados personalizados
-    st.markdown("---")
-    st.markdown("""
-    <div class="content-box">
-        <h2> Inserir Dados Personalizados 📝</h2>
-        <p>Você pode adicionar seus próprios dados para análise! </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        nome_metrica = st.text_input(" Nome da Métrica", placeholder="Ex: Tempo em Redes Sociais")
-    
-    with col2:
-        valor_metrica = st.number_input(" Valor", min_value=0.0, max_value=100.0, step=0.1)
-    
-    if st.button("✅ Adicionar Métrica"):
-        st.success(f" Métrica '{nome_metrica}' com valor {valor_metrica} adicionada com sucesso! 🎉")
+    with tab_survey:
+        st.markdown("## Resultados da Pesquisa Acadêmica (Survey_AI)")
+        if df_survey is not None:
+            plot_conhecimento_ia(df_survey)
+            plot_sentimentos_ia(df_survey)
+            plot_likert_scale(df_survey, 'Substituicao_Emprego_Desc', '3. Percepção sobre Substituição de Empregos pela IA')
+            plot_likert_scale(df_survey, 'Crescimento_Economico_Desc', '4. Percepção sobre Crescimento Econômico pela IA')
+            plot_conhecimento_vs_sentimento(df_survey)
+        else:
+            st.error("Não foi possível carregar os dados da Pesquisa Acadêmica. Verifique o arquivo 'Survey_AI.csv'.")
 
-# ==================== PÁGINA: PONTOS POSITIVOS (Nova Seção) ====================
-elif pagina == " 🟢 Pontos Positivos":
-    st.markdown("# 🟢 Pontos Positivos da IA: Eficiência e Inovação")
-    
-    st.info("A Inteligência Artificial é uma ferramenta poderosa que impulsiona a inovação, aumenta a produtividade e resolve problemas complexos em escala global. Seus benefícios são inegáveis em diversas áreas.")
-    
-    st.markdown("""
-    <div class="content-box">
-        <h2>Benefícios Chave da IA</h2>
-        <p>
-            A IA tem transformado indústrias inteiras, desde a saúde até a manufatura. Seus principais pontos positivos incluem:
-        </p>
-        <ul>
-            <li><strong>Aumento da Eficiência:</strong> Automação de tarefas repetitivas, liberando humanos para trabalhos mais criativos e estratégicos.</li>
-            <li><strong>Inovação Científica:</strong> Aceleração da pesquisa em áreas como descoberta de medicamentos, ciência de materiais e modelagem climática.</li>
-            <li><strong>Personalização:</strong> Criação de experiências e serviços altamente personalizados para usuários e clientes (e-commerce, educação, saúde).</li>
-            <li><strong>Análise de Dados Complexos:</strong> Capacidade de processar e encontrar padrões em grandes volumes de dados (Big Data) que seriam impossíveis para humanos.</li>
-            <li><strong>Acessibilidade:</strong> Ferramentas de IA podem tornar a tecnologia mais acessível para pessoas com deficiência (tradução em tempo real, assistentes de voz).</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("""
-    <div class="content-box">
-        <h2> Dados Reais de Impacto Positivo (MySQL) </h2>
-        <p>
-            Esta seção demonstra o impacto positivo da Inteligência Artificial em diversos setores, 
-            utilizando dados extraídos diretamente do seu banco de dados MySQL. 
-            <strong>Certifique-se de que as credenciais em <code>DB_CONFIG</code> (linhas 20-25) e a tabela <code>ia_impacto_positivo</code> 
-            existam e estejam preenchidas com as colunas esperadas (setor, valor_antes, valor_depois).</strong>
-        </p>
-        <p>
-            <strong>Configuração Atual do Banco de Dados:</strong> <code>{db_user}@{db_host}/{db_name}</code>
-        </p>
-    </div>
-    """.format(db_user=DB_CONFIG['user'], db_host=DB_CONFIG['host'], db_name=DB_CONFIG['database']), unsafe_allow_html=True)
-    
-    # Query de exemplo. O usuário deve adaptar esta query para sua tabela.
-    QUERY_EXEMPLO = "SELECT setor, valor_antes, valor_depois FROM ia_impacto_positivo;"
-    
-    st.markdown("### 1. Gráfico de Comparação: Antes vs. Com IA")
-    
-    # Obtém os dados do banco de dados
-    df_impacto = get_data_from_db(QUERY_EXEMPLO)
-    
-    # Cria o gráfico de impacto positivo
-    create_positive_impact_chart(df_impacto)
-    
-    st.markdown("### 2. Gráfico de Distribuição de Ganhos de Eficiência")
-    
-    # Cria o gráfico de pizza de eficiência
-    create_efficiency_pie_chart(df_impacto)
-    
-    st.markdown("---")
-    st.markdown("### 📝 Dados Brutos (Para Conferência)")
-    st.dataframe(df_impacto, use_container_width=True)
-    
-elif pagina == " 🔴 Pontos Negativos":
-    st.markdown("# 🔴 Pontos Negativos da IA: Riscos e Desafios Éticos")
-    
-    st.warning("O avanço acelerado da Inteligência Artificial levanta preocupações significativas sobre o futuro do trabalho, a privacidade, a ética e, conforme o tema central deste projeto, o impacto na cognição humana.")
-    
-    st.markdown("""
-    <div class="content-box">
-        <h2>Riscos e Desafios Éticos</h2>
-        <p>
-            Apesar dos benefícios, o uso descontrolado ou excessivo da IA pode gerar consequências negativas importantes:
-        </p>
-        <ul>
-            <li><strong>Viés e Discriminação:</strong> Sistemas de IA podem perpetuar e amplificar vieses existentes nos dados de treinamento, levando a decisões injustas ou discriminatórias.</li>
-            <li><strong>Desemprego Tecnológico:</strong> A automação pode substituir empregos em larga escala, exigindo uma requalificação massiva da força de trabalho.</li>
-            <li><strong>Dependência Cognitiva (Cognitive Offloading):</strong> O uso constante de IA para tarefas intelectuais pode levar à atrofia de habilidades cognitivas essenciais, como memória, pensamento crítico e criatividade.</li>
-            <li><strong>Concentração de Poder:</strong> O controle da tecnologia de IA por poucas grandes corporações pode levar a um desequilíbrio de poder e vigilância em massa.</li>
-            <li><strong>Desinformação e Deepfakes:</strong> A IA facilita a criação de conteúdo falso e altamente convincente, ameaçando a confiança pública e a estabilidade social.</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("### 🧠 Impacto na Cognição Humana (Gráficos Existentes)")
-    
-    st.markdown("""
-    <div class="content-box">
-        <p>
-            Os gráficos a seguir, presentes na seção "Análise de Dados", ilustram a hipótese central deste projeto: a relação inversamente proporcional entre o crescimento da IA e a capacidade cognitiva humana.
-        </p>
-        <p>
-            <strong>Eles demonstram a queda observada em métricas como criatividade, pensamento crítico e autonomia após o uso excessivo de ferramentas de IA.</strong>
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Replicando a estrutura de gráficos da página "Análise de Dados" para manter a consistência
-    # O usuário já tem os gráficos na página "Análise de Dados", mas podemos replicar a chamada
-    # para o gráfico de impacto cognitivo para reforçar o ponto negativo.
-    
-    # Dados simulados (copiados da seção "Análise de Dados" para exibição)
-    categorias = ['Criatividade 🎨', 'Pensamento Crítico 🤔', 'Autonomia 🦸', 'Concentração 🎯', 'Memória 💾']
-    antes = [85, 80, 88, 90, 92]
-    depois = [65, 55, 62, 68, 70]
-    
-    # Criando um DataFrame para a função create_efficiency_pie_chart (apenas para manter a estrutura)
-    # Como o gráfico de impacto cognitivo não usa a função genérica, vamos apenas criar o espaço
-    
-    st.markdown("### 1. Comparação de Habilidades Cognitivas (Antes vs. Depois da IA)")
-    
-    # Chamada para o gráfico de impacto cognitivo (se estivesse em uma função)
-    # Como não está, o usuário deve ser instruído a ver a seção "Análise de Dados"
-    # Para manter o gráfico, vamos replicar o código dele aqui, ou apenas o espaço
-    
-    # Para manter o código limpo e evitar duplicação, vou apenas deixar o espaço e a instrução
-    st.info("Para visualizar os gráficos que demonstram o impacto negativo na cognição, navegue para a seção **📈 Análise de Dados** e explore a aba **🧠 Cognição**.")
-    
-    # Se o usuário quiser o gráfico aqui, o código seria:
-    # fig = go.Figure(data=[
-    #     go.Bar(name='Antes do Uso Excessivo de IA 📈', x=categorias, y=antes, marker_color='#0099ff'),
-    #     go.Bar(name='Depois do Uso Excessivo de IA 📉', x=categorias, y=depois, marker_color='#ff6b6b')
-    # ])
-    # fig.update_layout(
-    #     title="🧠 Comparação de Habilidades Cognitivas",
-    #     barmode='group',
-    #     hovermode='x unified',
-    #     template='plotly_dark',
-    #     plot_bgcolor='rgba(0, 0, 0, 0.1)',
-    #     paper_bgcolor='rgba(0, 4, 40, 0.3)',
-    #     font=dict(color='white', size=12),
-    #     yaxis_title="Nível de Capacidade (%)"
-    # )
-    # st.plotly_chart(fig, use_container_width=True)
-
-# ==================== PÁGINA: SOBRE ====================
+    with tab_impact:
+        st.markdown("## Resultados da Pesquisa de Impacto Geral (Impact_AI_v2)")
+        if df_impact is not None:
+            plot_confianca_ia(df_impact)
+            plot_impacto_humanidade(df_impact)
+            plot_likert_scale(df_impact, 'Ameaça_Liberdades_Desc', '9. Ameaça às Liberdades Individuais pela IA')
+            plot_limites_eticos(df_impact)
+        else:
+            st.error("Não foi possível carregar os dados da Pesquisa de Impacto Geral. Verifique o arquivo 'Impact_AI_v2.csv'.")
+# ==================== PÁGINA: SOBRE =====================
 elif pagina == "ℹ️ Sobre":
     st.markdown("# Sobre o Projeto ")
     
@@ -854,64 +1237,120 @@ elif pagina == "ℹ️ Sobre":
             <strong>Metodologia:</strong> A pesquisa utiliza Python para coleta de dados, SQL para manipulação de banco de dados, 
             e Streamlit para criação de dashboards interativos que permitem visualizar os resultados de forma clara e acessível. 
         </p>
+        <p>
+            <strong>Relevância:</strong> Este estudo é fundamental para compreender criticamente os efeitos da tecnologia no 
+            desenvolvimento humano, considerando tanto os benefícios quanto os malefícios do uso excessivo. Propõe estratégias 
+            que promovam o uso equilibrado da IA, estimulando competências cognitivas e criativas. 
+        </p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Autoras
-    st.markdown("## Autoras do Projeto 👩‍💻")
+    # Conclusões Principais
+    st.markdown("## Conclusões Principais ")
+    
+    st.markdown("""
+    <div class="content-box">
+        <p><strong>1. Deslocamento Cognitivo:</strong> A facilidade de acesso a respostas por meio de IA e buscas instantâneas convive com sinais de redução do esforço cognitivo deliberado em tarefas que exigem elaboração própria. 🧠❌</p>
+        <p><strong>2. Padrão de Uso é Crucial:</strong> O ponto de atenção reside menos na ferramenta e mais no padrão de uso. Quando o uso é constante e automático, emergem sinais de queda na autorregulação e no pensamento crítico. Quando é pontual e consciente, os ganhos de eficiência tendem a não comprometer a autonomia. ⚖️</p>
+        <p><strong>3. Semeando Desafios Futuros:</strong> A sociedade colhe facilidades substanciais com IA e internet, mas pode semear desafios futuros se a prática cotidiana consolidar respostas imediatas como substitutas e não complementares da elaboração própria. 🌱⚠️</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Sobre as Autoras
+    st.markdown("##  Sobre as Autoras ")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("""
+        st.html("""
         <div class="author-card">
-            <h3>Autora 1</h3>
+            <h3> Nicoli Felipe</h3>
             <p>
-                <strong>Formação:</strong> Bacharel em Ciência da Computação.
-            </p>
-            <p>
-                <strong>Foco da Pesquisa:</strong> Impacto da IA na criatividade e no pensamento crítico.
+                <strong>Formação:</strong><br>
+                🎓 Graduanda em Ciência de Dados pela Faculdade SENAI de Informática (2025-2026)<br>
+                🎓 Graduanda em Informática para Negócios pela Fatec (2025-2027)<br>
+                🎓 Técnica em Administração pela ETEC de Mauá (2024)<br><br>
+                <strong>ORCID:</strong> 0009-0001-5123-5059<br>
+                📧 nicolifelipe01@gmail.com
             </p>
         </div>
-        """, unsafe_allow_html=True)
-        
+        """)
+    
     with col2:
         st.markdown("""
         <div class="author-card">
-            <h3>Autora 2</h3>
+            <h3> Mirian Sanches Fiorini</h3>
             <p>
-                <strong>Formação:</strong> Mestre em Psicologia Cognitiva.
-            </p>
-            <p>
-                <strong>Foco da Pesquisa:</strong> Fenômenos de Cognitive Offloading e Brain Rot.
+                <strong>Formação:</strong><br>
+                <p>
+                🎓 Graduanda em Ciência de Dados pela Faculdade SENAI de Informática (2025-2026)<br>
+                🎓 Técnica em Música pela Fundação das Artes (2022)<br><br>
+                <p>
+                <p>
+                <p>
+                <strong>ORCID:</strong> 0009-0003-1680-2542<br>
+                📧 sanchesmirian489@gmail.com
+                <p>
+                <p>
             </p>
         </div>
         """, unsafe_allow_html=True)
-        
-    # Referências
-    st.markdown("## Referências Selecionadas 📚")
     
+    # Sobre a Orientadora
     st.markdown("""
-    <div class="references-section">
-        <div class="reference-item">
-            <p>
-                <strong>Carr, N. (2010).</strong> <em>The Shallows: What the Internet Is Doing to Our Brains.</em> W. W. Norton & Company.
-            </p>
-        </div>
-        <div class="reference-item">
-            <p>
-                <strong>Sparrow, B., Liu, J., & Wegner, D. M. (2011).</strong> <em>Google Effects on Memory: Cognitive Consequences of Having Information at Our Fingertips.</em> Science, 333(6043), 776-778.
-            </p>
-        </div>
-        <div class="reference-item">
-            <p>
-                <strong>Turkle, S. (2011).</strong> <em>Alone Together: Why We Expect More from Technology and Less from Each Other.</em> Basic Books.
-            </p>
-        </div>
-        <div class="reference-item">
-            <p>
-                <strong>Tegmark, M. (2017).</strong> <em>Life 3.0: Being Human in the Age of Artificial Intelligence.</em> Alfred A. Knopf.
-            </p>
-        </div>
+    <div class="author-card">
+        <h3> Jéssica Franzon Cruz do Espírito Santo (Orientadora)</h3>
+        <p>
+            <strong>Formação Acadêmica:</strong><br>
+            🎓 Bacharelado em Ciência da Computação (2018-2021) - Universidade Paulista (UNIP)<br>
+            🎓 Pós-graduação em Gestão Educacional na Perspectiva Inclusiva (2022) - Universidade Federal de Pelotas (UFPEL)<br>
+            🎓 Pós-graduação em Psicopedagogia (2024) - Faculdade das Américas (FAM)<br>
+            🎓 Mestranda em Engenharia da Informação - UFABC<br><br>
+            <strong>Atuação Profissional:</strong><br>
+            👨‍🏫 Professora na Faculdade SENAI (Campus Paulo Antônio Skaf) - Curso de Ciência de Dados<br>
+            💡 Especialista em educação inclusiva e psicopedagogia aplicada à tecnologia
+        </p>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Referências Principais
+    st.markdown("## 📚 Referências Principais 📚")
+    
+    st.markdown("""
+    <div class="content-box">
+        <p style="color: #1a1a2e;">
+            - **🔗 Cognitive Offloading:** Gerlich, M. (2025). AI Tools in Society: Impacts on Cognitive Offloading and the Future of Critical Thinking. Societies.
+        </p>
+        <p style="color: #1a1a2e;">
+            - **🔗 Brain Rot:** Thoreau, H. D. (2006). Walden: a vida nos bosques. Tradução de Denise Bottmann. São Paulo: Martin Claret.
+        </p>
+        <p style="color: #1a1a2e;">
+            - **🔗 Internet e Distração:** Carr, N. (2011). A geração superficial: o que a internet está fazendo com nossos cérebros. Rio de Janeiro: Agir.
+        </p>
+        <p style="color: #1a1a2e;">
+            - **🔗 Mental Fog:** Cleveland Clinic (2024). Brain fog: symptoms, causes and treatment. Disponível em: https://my.clevelandclinic.org/health/symptoms/brain-fog
+        </p>
+        <p style="color: #1a1a2e;">
+            - **🔗 IA e Aprendizado:** Fan, Y. et al. (2024). Beware of metacognitive laziness: Effects of generative artificial intelligence on learning motivation, processes, and performance. arXiv.
+        </p>
+        <p style="color: #1a1a2e;">
+            - **🔗 IA e Criatividade:** Doshi, A. R.; Hauser, O. P. (2024). Generative artificial intelligence enhances creativity but reduces the collective diversity of novel content. Science Advances, v. 10, n. 28.
+        </p>
+        <p style="color: #1a1a2e;">
+            - **🔗 Cognitive Overload:** Cell (2025). Cognitive overload and brain fog in modern life. Trends in Neurosciences.
+        </p>
+        <p style="color: #1a1a2e;">
+            - **🔗 BMC Public Health:** BMC Public Health (2025). Brain fog and cognitive difficulties: impact on work and social life.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+
+# ==================== RODAPÉ ====================
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; color: #0099ff; padding: 2rem; font-size: 0.9rem;">
+    <p><strong>Relação de Crescimento Inversamente Proporcional Entre a Inteligência Artificial e a Inteligência Humana</strong> </p>
+    <p>Faculdade SENAI Paulo Antônio Skaf - Ciência de Dados </p>
+    <p>© 2025 - Todos os direitos reservados ©</p>
+</div>""", unsafe_allow_html = True)
